@@ -1,23 +1,16 @@
+// App.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-/* ================================
-   CONFIG — fill these two values
-   ================================ */
-const SUPABASE_URL = "https://bkhkgxgmlhvjidoximyx.supabase.co";  // <-- change
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";               // <-- change
+// ✅ STEP 3: PASTE YOUR KEYS HERE
+const SUPABASE_URL = "https://bkhkgxgmlhvjidoximyx.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";
 
-/* If you don’t want sync yet, leave the two values above as-is.
-   The app will still run with localStorage only. */
+// Import Supabase client via ESM CDN (no npm needed)
+import { createClient, RealtimeChannel } from "https://esm.sh/@supabase/supabase-js@2";
 
-let supabase: SupabaseClient | null = null;
-if (SUPABASE_URL.startsWith("https://") && SUPABASE_ANON_KEY.length > 10) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false },
-  });
-}
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/* ============ Types ============ */
+// ---------------- Types ----------------
 const STATUSES = [
   "Stock",
   "Display",
@@ -30,61 +23,34 @@ const STATUSES = [
 type Status = typeof STATUSES[number];
 
 type Item = {
-  id: string;            // uuid
+  id: string;
   model: string;
   serial?: string | null;
   status: Status;
   location?: string | null;
   notes?: string | null;
   cost?: number | null;
-  receivedAt?: string | null; // ISO date
-  updatedAt: string;          // ISO string
+  received_at?: string | null;  // date (YYYY-MM-DD)
+  updated_at: string;           // ISO timestamp
+  created_at?: string;          // ISO timestamp
 };
 
-/* ====== Storage helpers (local + remote) ====== */
-const STORAGE_KEY = "inventory-manager-v1";
-
-const uuid = () =>
-  globalThis.crypto?.randomUUID
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2) + Date.now();
-
-const seedData: Item[] = [
-  { id: uuid(), model: "EX11CN", status: "Stock", location: "—", notes: "Sylvia", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "EX11CN", status: "Stock", location: "—", notes: "Sylvia", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "EX11CN", status: "Stock", location: "—", notes: "Sylvia", updatedAt: new Date().toISOString() },
-
-  { id: uuid(), model: "EX17CN", status: "Open Box", location: "take back from 1614 Allison", notes: "Sylvia", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "EX17CN", status: "Display", location: "Showroom Display", notes: "Showroom", updatedAt: new Date().toISOString() },
-
-  { id: uuid(), model: "EX22CN", serial: "NB.LB-003680", status: "Stock", location: "—", notes: "Sylvia", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "EX22CN", serial: "NB.LB-003006", status: "Stock", location: "Shop — 1619 Prairie (10-7533)", notes: "Aug 25", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "EX22CN", serial: "24397", status: "Stock", location: "Shop", notes: "July 23 — new stock at shop, finally sale", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "EX22CN", serial: "NB.LB-003008", status: "Stock", location: "Shop", notes: "July 23 — new stock at shop, finally sale", updatedAt: new Date().toISOString() },
-
-  { id: uuid(), model: "AR9T960603BN", serial: "2505267633", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "AR9T960603BN", serial: "2505272372", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "AR9T960603BN", serial: "2505272374", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: new Date().toISOString() },
-
-  { id: uuid(), model: "AMVM970803BN", serial: "2411115464", status: "Stock", location: "Shop", notes: "10-10", updatedAt: new Date().toISOString() },
-  { id: uuid(), model: "AMVM970803BN", serial: "2411115465", status: "Stock", location: "Shop", notes: "10-10", updatedAt: new Date().toISOString() },
-];
-
-const loadLocal = (): Item[] => {
+// ------------- Local cache helpers -------------
+const STORAGE_KEY = "inventory-manager-cache-v2";
+const loadCache = (): Item[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return seedData;
-    const parsed = JSON.parse(raw) as Item[];
-    return parsed?.length ? parsed : seedData;
+    return raw ? (JSON.parse(raw) as Item[]) : [];
   } catch {
-    return seedData;
+    return [];
   }
 };
-const saveLocal = (items: Item[]) =>
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+const saveCache = (rows: Item[]) => {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(rows)); } catch {}
+};
 
-/* CSV helpers */
-function csvEscape(v: string | number | undefined | null) {
+// CSV helpers
+function csvEscape(v: any) {
   if (v === undefined || v === null) return "";
   const s = String(v);
   return /[",\n]/.test(s) ? '"' + s.replaceAll('"', '""') + '"' : s;
@@ -92,47 +58,74 @@ function csvEscape(v: string | number | undefined | null) {
 function downloadCSV(filename: string, rows: Item[]) {
   const header = ["Model","Serial","Status","Location","Notes","Cost","ReceivedAt","UpdatedAt"];
   const lines = [header.join(",")].concat(
-    rows.map(r =>
-      [r.model, r.serial, r.status, r.location, r.notes, r.cost ?? "", r.receivedAt ?? "", r.updatedAt]
-        .map(csvEscape).join(",")
-    )
+    rows.map(r => [
+      r.model, r.serial ?? "", r.status, r.location ?? "", r.notes ?? "",
+      r.cost ?? "", r.received_at ?? "", r.updated_at
+    ].map(csvEscape).join(","))
   );
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
 }
 function parseCSV(text: string): Item[] {
   const lines = text.trim().split(/\r?\n/);
   if (!lines.length) return [];
-  const header = lines[0].split(",").map(s=>s.trim().toLowerCase());
-  const idx = (name: string) => header.indexOf(name.toLowerCase());
-  const items: Item[] = [];
-  for (let i=1;i<lines.length;i++){
+  const header = lines[0].split(",").map(s => s.trim().toLowerCase());
+  const at = (k: string) => header.indexOf(k.toLowerCase());
+  const out: Item[] = [];
+  for (let i = 1; i < lines.length; i++) {
     const row = lines[i];
     const cols = row.match(/([^",]+|"(?:[^"]|"")*")+/g) || [];
-    const get = (n: string) => {
-      const j = idx(n); if (j<0) return "";
+    const get = (name: string) => {
+      const j = at(name); if (j < 0) return "";
       const raw = cols[j] || "";
-      return raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1,-1).replaceAll('""','"') : raw;
+      return raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1).replaceAll('""','"') : raw;
     };
     const now = new Date().toISOString();
-    items.push({
-      id: uuid(),
-      model: get("model") || "UNKNOWN",
-      serial: get("serial") || null,
-      status: (get("status") as Status) || "Stock",
-      location: get("location") || null,
-      notes: get("notes") || null,
-      cost: get("cost") ? Number(get("cost")) : null,
-      receivedAt: get("receivedat") || null,
-      updatedAt: get("updatedat") || now,
+    out.push({
+      id: crypto.randomUUID(),
+      model: get("Model") || get("model") || "UNKNOWN",
+      serial: get("Serial") || null,
+      status: (get("Status") as Status) || "Stock",
+      location: get("Location") || null,
+      notes: get("Notes") || null,
+      cost: get("Cost") ? Number(get("Cost")) : null,
+      received_at: get("ReceivedAt") || null,
+      updated_at: get("UpdatedAt") || now,
+      created_at: now,
     });
   }
-  return items;
+  return out;
 }
 
-/* ====== Minimal styles (no deps) ====== */
+// ---------------- Supabase data ops ----------------
+async function fetchAll(): Promise<Item[]> {
+  const { data, error } = await supabase
+    .from("items")
+    .select("*")
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+  return (data || []) as Item[];
+}
+
+async function upsertItem(row: Partial<Item> & { id?: string }) {
+  const payload: any = { ...row };
+  if (!payload.id) payload.id = crypto.randomUUID();
+  payload.updated_at = new Date().toISOString();
+  const { data, error } = await supabase.from("items").upsert(payload).select().single();
+  if (error) throw error;
+  return data as Item;
+}
+
+async function deleteItem(id: string) {
+  const { error } = await supabase.from("items").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// --------------- UI styles (plain CSS-in-JS) ---------------
 const styles = {
   container: { maxWidth: 1100, margin: "0 auto", padding: 16, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" },
   h1: { fontSize: 22, margin: "8px 0 4px" },
@@ -151,156 +144,91 @@ const styles = {
   stat: { border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, textAlign: "center" as const },
 };
 
-/* ====== Scanner Modal (BarcodeDetector if available) ====== */
-function ScannerModal({open, mode, onClose, onScanned}:{open:boolean, mode:"IN"|"OUT", onClose:()=>void, onScanned:(code:string)=>void}) {
-  const videoRef = useRef<HTMLVideoElement|null>(null);
-  const [supported, setSupported] = useState(false);
-  const [error, setError] = useState("");
-  const [manual, setManual] = useState("");
-  const streamRef = useRef<MediaStream|null>(null);
-  const rafRef = useRef<number|undefined>(undefined);
+// --------------- Components ---------------
+function InventoryForm({ initial, onSubmit }: { initial?: Partial<Item>, onSubmit: (i: Item) => void }) {
+  const [model, setModel] = useState(initial?.model || "");
+  const [serial, setSerial] = useState(initial?.serial || "");
+  const [status, setStatus] = useState<Status>((initial?.status as Status) || "Stock");
+  const [location, setLocation] = useState(initial?.location || "");
+  const [notes, setNotes] = useState(initial?.notes || "");
+  const [cost, setCost] = useState(initial?.cost?.toString() || "");
+  const [receivedAt, setReceivedAt] = useState(initial?.received_at || "");
 
-  useEffect(()=>{
-    if(!open) return;
-    setError(""); setManual("");
-    let cancelled = false;
-
-    async function start() {
-      try{
-        const hasBarcode = typeof (globalThis as any).BarcodeDetector !== "undefined";
-        setSupported(hasBarcode);
-
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        if(cancelled) return;
-        streamRef.current = stream;
-        if(videoRef.current){
-          (videoRef.current as any).srcObject = stream;
-          await (videoRef.current as any).play();
-        }
-        if(hasBarcode){
-          const detector = new (window as any).BarcodeDetector({ formats: ["qr_code","code_128","ean_13","ean_8","upc_a","upc_e"] });
-          const tick = async () => {
-            try{
-              if(videoRef.current){
-                const results = await detector.detect(videoRef.current);
-                if(results && results.length){
-                  const payload = results[0].rawValue || results[0].cornerPoints?.toString();
-                  if(payload){ onScanned(String(payload)); }
-                }
-              }
-            }catch(_e){}
-            rafRef.current = requestAnimationFrame(tick);
-          };
-          rafRef.current = requestAnimationFrame(tick);
-        }
-      }catch(e:any){
-        setError(e?.message || "Camera access failed");
-      }
-    }
-    start();
-
-    return ()=>{
-      if(rafRef.current) cancelAnimationFrame(rafRef.current);
-      const s = streamRef.current; streamRef.current = null;
-      if(s){ s.getTracks().forEach(t=>t.stop()); }
-    };
-  },[open]);
-
-  if(!open) return null;
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:60 }}>
-      <div style={{ background:"#fff", borderRadius:12, width:"min(720px,95vw)", padding:16 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-          <div style={{ fontWeight:700 }}>Scan to {mode === "IN" ? "ADD (IN)" : "REMOVE (OUT)"} inventory</div>
-          <button style={styles.button as any} onClick={onClose}>✕</button>
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:12 }}>
-          {supported ? (
-            <div>
-              <video ref={videoRef} style={{ width:"100%", borderRadius:12, background:"#000" }} muted playsInline />
-              <div style={{...styles.muted, marginTop:6}}>Point the camera at the barcode. (iPhone Safari often lacks BarcodeDetector; manual entry is available.)</div>
-            </div>
-          ) : (
-            <div style={{...styles.muted}}>BarcodeDetector not supported; use manual entry below.</div>
-          )}
-          {!!error && <div style={{ color:"#b91c1c", fontSize:13 }}>Camera error: {error}</div>}
-          <div>
-            <div style={{ marginBottom:6 }}>Manual code (fallback)</div>
-            <div style={{ display:"flex", gap:8 }}>
-              <input value={manual} onChange={e=>setManual(e.target.value)} placeholder="Scan code or type here" style={{...styles.input, flex:1} as any} />
-              <button style={styles.buttonPrimary as any} onClick={()=>{ if(manual.trim()) onScanned(manual.trim()); }}>Submit</button>
-            </div>
-          </div>
-        </div>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div>
+        <div>Model</div>
+        <input style={styles.input as any} value={model} onChange={e => setModel(e.target.value)} placeholder="e.g., EX22CN" />
       </div>
-    </div>
-  );
-}
-
-/* ============ Small UI bits ============ */
-function InventoryForm({initial, onSubmit}:{initial?: Partial<Item>, onSubmit:(i:Item)=>void}){
-  const [model,setModel] = useState(initial?.model||"");
-  const [serial,setSerial] = useState(initial?.serial||"");
-  const [status,setStatus] = useState<Status>((initial?.status as Status) || "Stock");
-  const [location,setLocation] = useState(initial?.location||"");
-  const [notes,setNotes] = useState(initial?.notes||"");
-  const [cost,setCost] = useState(initial?.cost?.toString()||"");
-  const [receivedAt,setReceivedAt] = useState(initial?.receivedAt||"");
-
-  return (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-      <div><div>Model</div><input style={styles.input as any} value={model} onChange={e=>setModel(e.target.value)} placeholder="e.g., EX22CN" /></div>
-      <div><div>Serial</div><input style={styles.input as any} value={serial} onChange={e=>setSerial(e.target.value)} placeholder="e.g., NB.LB-003680" /></div>
+      <div>
+        <div>Serial</div>
+        <input style={styles.input as any} value={serial ?? ""} onChange={e => setSerial(e.target.value)} placeholder="e.g., NB.LB-003680" />
+      </div>
       <div>
         <div>Status</div>
-        <select style={styles.select as any} value={status} onChange={(e)=>setStatus(e.target.value as Status)}>
-          {STATUSES.map(s=> <option key={s} value={s}>{s}</option>)}
+        <select style={styles.select as any} value={status} onChange={(e) => setStatus(e.target.value as Status)}>
+          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
-      <div><div>Location</div><input style={styles.input as any} value={location} onChange={e=>setLocation(e.target.value)} placeholder="Shop / Showroom / 1619 Prairie" /></div>
-      <div style={{ gridColumn:"1 / span 2" }}>
-        <div>Notes</div>
-        <textarea style={{...styles.input, width:"100%", minHeight:64} as any} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Purchase, dates, who handled it (e.g., Sylvia)" />
+      <div>
+        <div>Location</div>
+        <input style={styles.input as any} value={location ?? ""} onChange={e => setLocation(e.target.value)} placeholder="Shop / Showroom / 1619 Prairie" />
       </div>
-      <div><div>Cost (with tax)</div><input type="number" style={styles.input as any} value={cost} onChange={e=>setCost(e.target.value)} placeholder="e.g., 2309" /></div>
-      <div><div>Received At</div><input type="date" style={styles.input as any} value={receivedAt} onChange={e=>setReceivedAt(e.target.value)} /></div>
-      <div style={{ gridColumn:"1 / span 2", display:"flex", justifyContent:"flex-end", gap:8 }}>
-        <button style={styles.buttonPrimary as any} onClick={()=>{
-          const now = new Date().toISOString();
-          onSubmit({
-            id: initial?.id || uuid(),
-            model: model.trim() || "UNKNOWN",
-            serial: serial.trim() || null,
-            status,
-            location: location.trim() || null,
-            notes: notes.trim() || null,
-            cost: cost? Number(cost): null,
-            receivedAt: receivedAt || null,
-            updatedAt: now,
-          } as Item);
-        }}>Save</button>
+      <div style={{ gridColumn: "1 / span 2" }}>
+        <div>Notes</div>
+        <textarea style={{ ...styles.input, width: "100%", minHeight: 64 } as any} value={notes ?? ""} onChange={e => setNotes(e.target.value)} placeholder="Notes (e.g., Sylvia, Aug 25)" />
+      </div>
+      <div>
+        <div>Cost (with tax)</div>
+        <input type="number" style={styles.input as any} value={cost} onChange={e => setCost(e.target.value)} placeholder="e.g., 2309" />
+      </div>
+      <div>
+        <div>Received At</div>
+        <input type="date" style={styles.input as any} value={receivedAt ?? ""} onChange={e => setReceivedAt(e.target.value)} />
+      </div>
+      <div style={{ gridColumn: "1 / span 2", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button
+          style={styles.buttonPrimary as any}
+          onClick={() => {
+            const now = new Date().toISOString();
+            onSubmit({
+              id: (initial as Item)?.id || crypto.randomUUID(),
+              model: model.trim() || "UNKNOWN",
+              serial: (serial || "").trim() || null,
+              status,
+              location: (location || "").trim() || null,
+              notes: (notes || "").trim() || null,
+              cost: cost ? Number(cost) : null,
+              received_at: receivedAt || null,
+              updated_at: now,
+              created_at: (initial as Item)?.created_at || now
+            } as Item);
+          }}
+        >Save</button>
       </div>
     </div>
   );
 }
-function RowActions({item, onEdit, onDelete, onQuick}:{item:Item, onEdit:()=>void, onDelete:()=>void, onQuick:(i:Partial<Item>)=>void}){
+
+function RowActions({ item, onEdit, onDelete, onQuick }: { item: Item, onEdit: () => void, onDelete: () => void, onQuick: (i: Partial<Item>) => void }) {
   return (
-    <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-      <button style={styles.button as any} onClick={()=>onQuick({status:"Installed/Sold"})}>Mark Sold</button>
-      <button style={styles.button as any} onClick={()=>onQuick({status:"Reserved"})}>Reserve</button>
-      <button style={styles.button as any} onClick={()=>onQuick({status:"Display", location:"Showroom"})}>Move to Showroom</button>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <button style={styles.button as any} onClick={() => onQuick({ status: "Installed/Sold" })}>Mark Sold</button>
+      <button style={styles.button as any} onClick={() => onQuick({ status: "Reserved" })}>Reserve</button>
+      <button style={styles.button as any} onClick={() => onQuick({ status: "Display", location: "Showroom" })}>Move to Showroom</button>
       <button style={styles.button as any} onClick={onEdit}>Edit</button>
       <button style={styles.button as any} onClick={onDelete}>Delete</button>
     </div>
   );
 }
-function Modal({open, title, onClose, children}:{open:boolean, title:string, onClose:()=>void, children:React.ReactNode}){
-  if(!open) return null;
+
+function Modal({ open, title, onClose, children }: { open: boolean, title: string, onClose: () => void, children: React.ReactNode }) {
+  if (!open) return null;
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.3)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:50 }}>
-      <div style={{ background:"white", borderRadius:12, padding:16, width:"min(680px, 92vw)" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-          <div style={{ fontWeight:600 }}>{title}</div>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+      <div style={{ background: "white", borderRadius: 12, padding: 16, width: "min(680px, 92vw)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontWeight: 600 }}>{title}</div>
           <button style={styles.button as any} onClick={onClose}>✕</button>
         </div>
         <div>{children}</div>
@@ -309,212 +237,288 @@ function Modal({open, title, onClose, children}:{open:boolean, title:string, onC
   );
 }
 
-/* ====== Supabase sync helpers ====== */
-async function fetchAllRemote(): Promise<Item[]> {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("inventory_items")
-    .select("*")
-    .order("updatedAt", { ascending: false }) as any;
-  if (error) throw error;
-  return (data || []) as Item[];
+// ---- Barcode Scanner (native API with fallback) ----
+function ScannerModal({ open, mode, onClose, onScanned }: { open: boolean, mode: 'IN' | 'OUT', onClose: () => void, onScanned: (code: string) => void }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [supported, setSupported] = useState<boolean>(false);
+  const [error, setError] = useState<string>("");
+  const [manual, setManual] = useState<string>("");
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!open) return;
+    setError(""); setManual("");
+    let cancelled = false;
+
+    async function start() {
+      try {
+        const hasBarcode = typeof (globalThis as any).BarcodeDetector !== "undefined";
+        setSupported(hasBarcode);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (cancelled) return;
+        streamRef.current = stream;
+        if (videoRef.current) {
+          (videoRef.current as any).srcObject = stream;
+          await (videoRef.current as any).play();
+        }
+        if (hasBarcode) {
+          const detector = new (window as any).BarcodeDetector({ formats: ["qr_code","code_128","ean_13","ean_8","upc_a","upc_e"] });
+          const tick = async () => {
+            try {
+              if (videoRef.current) {
+                const results = await detector.detect(videoRef.current);
+                if (results && results.length) {
+                  const payload = results[0].rawValue || results[0].cornerPoints?.toString();
+                  if (payload) { onScanned(String(payload)); }
+                }
+              }
+            } catch {}
+            rafRef.current = requestAnimationFrame(tick);
+          };
+          rafRef.current = requestAnimationFrame(tick);
+        }
+      } catch (e: any) {
+        setError(e?.message || "Camera access failed");
+      }
+    }
+    start();
+
+    return () => {
+      cancelled = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      const s = streamRef.current; streamRef.current = null;
+      if (s) { s.getTracks().forEach(t => t.stop()); }
+    };
+  }, [open]);
+
+  if (!open) return null;
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+      <div style={{ background: '#fff', borderRadius: 12, width: 'min(720px,95vw)', padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontWeight: 700 }}>Scan to {mode === 'IN' ? 'ADD (IN)' : 'REMOVE (OUT)'} inventory</div>
+          <button style={styles.button as any} onClick={onClose}>✕</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+          {supported ? (
+            <div>
+              <video ref={videoRef} style={{ width: '100%', borderRadius: 12, background: '#000' }} muted playsInline />
+              <div style={{ ...styles.muted, marginTop: 6 }}>Tip: Supported formats include Code128, EAN/UPC, QR.</div>
+            </div>
+          ) : (
+            <div style={{ ...styles.muted }}>BarcodeDetector not supported. Use manual entry or open in Chrome/Safari over HTTPS.</div>
+          )}
+          {!!error && <div style={{ color: '#b91c1c', fontSize: 13 }}>Camera error: {error}</div>}
+          <div>
+            <div style={{ marginBottom: 6 }}>Manual code (fallback)</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={manual} onChange={e => setManual(e.target.value)} placeholder="Scan code or type here" style={{ ...styles.input, flex: 1 } as any} />
+              <button style={styles.buttonPrimary as any} onClick={() => { if (manual.trim()) onScanned(manual.trim()); }}>Submit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-async function upsertRemote(it: Item) {
-  if (!supabase) return;
-  const { error } = await supabase.from("inventory_items").upsert(it, { onConflict: "id" });
-  if (error) console.error("supabase upsert error:", error.message);
+// ---- Helpers for scanning ----
+function findBySerial(items: Item[], serial: string) {
+  return items.find(i => (i.serial || "").toLowerCase() === serial.toLowerCase());
 }
-async function deleteRemote(id: string) {
-  if (!supabase) return;
-  const { error } = await supabase.from("inventory_items").delete().eq("id", id);
-  if (error) console.error("supabase delete error:", error.message);
+function createFromCode(code: string): Partial<Item> {
+  let model = "";
+  let serial = code.trim();
+  if (code.includes("|")) {
+    const [m, s] = code.split("|");
+    model = (m || "").trim();
+    serial = (s || "").trim();
+  }
+  return { model: model || "UNKNOWN", serial };
 }
 
-/* ============ MAIN APP ============ */
-export default function App(){
-  const [items, setItems] = useState<Item[]>(loadLocal());
+// --------------- Main App ---------------
+export default function App() {
+  const [items, setItems] = useState<Item[]>(loadCache());
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [locFilter, setLocFilter] = useState<string>("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
-  const [scanMode, setScanMode] = useState<"IN"|"OUT">("IN");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [scanMode, setScanMode] = useState<'IN' | 'OUT'>('IN');
 
-  // Local persistence
-  useEffect(()=>{ saveLocal(items); },[items]);
-
-  // Initial remote load + realtime subscription
-  useEffect(()=>{
-    if(!supabase) return; // local-only mode
-    (async ()=>{
-      try{
-        const remote = await fetchAllRemote();
-        if (remote.length) setItems(remote);
-      }catch(e){ console.warn("Remote fetch failed; staying local.", e); }
+  // First load from Supabase
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = await fetchAll();
+        setItems(rows);
+        saveCache(rows);
+      } catch {
+        // stay on cached data
+      }
     })();
+  }, []);
 
-    const channel = supabase
-      .channel("inv-changes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "inventory_items" },
-        (payload:any)=>{
-          setItems(prev=>{
-            if(payload.eventType === "INSERT" || payload.eventType === "UPDATE"){
-              const it = payload.new as Item;
-              const idx = prev.findIndex(p=>p.id === it.id);
-              if(idx >= 0) return [...prev.slice(0,idx), it, ...prev.slice(idx+1)];
-              return [it, ...prev];
-            } else if (payload.eventType === "DELETE"){
-              const id = payload.old.id as string;
-              return prev.filter(p=>p.id !== id);
-            }
-            return prev;
-          });
-        }
-      )
+  // Realtime changes
+  useEffect(() => {
+    const ch: RealtimeChannel = supabase
+      .channel("items-rt")
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, (payload: any) => {
+        setItems(prev => {
+          let next = prev.slice();
+          if (payload.eventType === "INSERT") {
+            next = [payload.new as Item, ...next.filter(x => x.id !== payload.new.id)];
+          } else if (payload.eventType === "UPDATE") {
+            next = next.map(x => x.id === payload.new.id ? (payload.new as Item) : x);
+          } else if (payload.eventType === "DELETE") {
+            next = next.filter(x => x.id !== payload.old.id);
+          }
+          saveCache(next);
+          return next;
+        });
+      })
       .subscribe();
 
-    return ()=>{ supabase?.removeChannel(channel); };
-  },[]);
+    return () => { supabase.removeChannel(ch); };
+  }, []);
 
-  const filtered = useMemo(()=>{
+  const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return items.filter(it=>{
-      const hay = [it.model,it.serial,it.status,it.location,it.notes].filter(Boolean).join(" ").toLowerCase();
+    return items.filter(it => {
+      const hay = [it.model, it.serial, it.status, it.location, it.notes].filter(Boolean).join(" ").toLowerCase();
       const okQ = !t || hay.includes(t);
       const okS = statusFilter === "all" || it.status === statusFilter;
-      const okL = locFilter === "all" || (it.location||"").toLowerCase().includes(locFilter.toLowerCase());
+      const okL = locFilter === "all" || (it.location || "").toLowerCase().includes(locFilter.toLowerCase());
       return okQ && okS && okL;
     });
-  },[items,q,statusFilter,locFilter]);
+  }, [items, q, statusFilter, locFilter]);
 
-  const stats = useMemo(()=>{
+  const stats = useMemo(() => {
     const byStatus: Record<string, number> = {};
-    const byModel: Record<string, number> = {};
-    filtered.forEach(i=>{
-      byStatus[i.status] = (byStatus[i.status]||0)+1;
-      byModel[i.model] = (byModel[i.model]||0)+1;
-    });
-    return { byStatus, byModel, total: filtered.length };
-  },[filtered]);
+    filtered.forEach(i => { byStatus[i.status] = (byStatus[i.status] || 0) + 1; });
+    return { byStatus, total: filtered.length };
+  }, [filtered]);
 
   const upsert = async (it: Item) => {
-    setItems(prev=>{
-      const idx = prev.findIndex(p => p.id === it.id);
-      return idx >= 0 ? [...prev.slice(0,idx), it, ...prev.slice(idx+1)] : [it, ...prev];
+    const saved = await upsertItem(it);
+    setItems(prev => {
+      const idx = prev.findIndex(p => p.id === saved.id);
+      const next = idx >= 0 ? [...prev.slice(0, idx), saved, ...prev.slice(idx + 1)] : [saved, ...prev];
+      saveCache(next);
+      return next;
     });
-    await upsertRemote(it);
     setEditing(null); setOpen(false);
   };
 
   const quickUpdate = async (item: Item, patch: Partial<Item>) => {
-    const it = { ...item, ...patch, updatedAt: new Date().toISOString() } as Item;
-    setItems(prev=> prev.map(p => p.id===item.id ? it : p));
-    await upsertRemote(it);
+    await upsert({ ...item, ...patch });
   };
 
   const remove = async (id: string) => {
-    setItems(prev => prev.filter(p => p.id!==id));
-    await deleteRemote(id);
+    await deleteItem(id);
+    setItems(prev => {
+      const next = prev.filter(p => p.id !== id);
+      saveCache(next);
+      return next;
+    });
   };
 
-  const doExport = () => downloadCSV(`inventory-${new Date().toISOString().slice(0,10)}.csv`, filtered);
-
+  const doExport = () => downloadCSV(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, filtered);
   const doImport = async (file: File) => {
     const text = await file.text();
     const imported = parseCSV(text);
     if (!imported.length) return;
-    // push to remote if available
-    if (supabase) {
-      for (const it of imported) await upsertRemote(it);
-      const remote = await fetchAllRemote();
-      setItems(remote.length ? remote : (p=>[...imported, ...p])(items));
-    } else {
-      setItems(prev => [...imported, ...prev]);
-    }
+    // upsert one by one (simple); we can batch later
+    for (const row of imported) { await upsertItem(row); }
+    const rows = await fetchAll();
+    setItems(rows); saveCache(rows);
   };
 
-  // Scan handling
   const handleScanned = async (code: string) => {
     setScanOpen(false);
     const now = new Date().toISOString();
-    const exists = items.find(i => (i.serial||"").toLowerCase() === code.toLowerCase());
+    const existing = findBySerial(items, code);
     if (scanMode === "IN") {
-      if (exists) {
-        await quickUpdate(exists, { status: "Stock", updatedAt: now });
+      if (existing) {
+        await upsert({ ...existing, status: "Stock", updated_at: now });
       } else {
-        const model = code.includes("|") ? code.split("|")[0].trim() || "UNKNOWN" : "UNKNOWN";
-        const serial = code.includes("|") ? code.split("|")[1].trim() : code.trim();
-        const it: Item = { id: uuid(), model, serial, status:"Stock", updatedAt: now };
-        await upsert(it);
+        const base = createFromCode(code);
+        await upsert({
+          id: crypto.randomUUID(),
+          model: (base.model as string) || "UNKNOWN",
+          serial: base.serial as string,
+          status: "Stock",
+          updated_at: now,
+        } as Item);
       }
-    } else { // OUT
-      if (exists) {
-        await quickUpdate(exists, { status: "Installed/Sold", updatedAt: now });
+    } else {
+      if (existing) {
+        await upsert({ ...existing, status: "Installed/Sold", updated_at: now });
       } else {
-        const model = code.includes("|") ? code.split("|")[0].trim() || "UNKNOWN" : "UNKNOWN";
-        const serial = code.includes("|") ? code.split("|")[1].trim() : code.trim();
-        const it: Item = { id: uuid(), model, serial, status:"Installed/Sold", notes:"Scanned OUT (placeholder)", updatedAt: now };
-        await upsert(it);
+        const base = createFromCode(code);
+        await upsert({
+          id: crypto.randomUUID(),
+          model: (base.model as string) || "UNKNOWN",
+          serial: base.serial as string,
+          status: "Installed/Sold",
+          notes: "Scanned OUT (placeholder)",
+          updated_at: now,
+        } as Item);
       }
     }
   };
+
+  // file input ref (CSV import)
+  const fileRef = useRef<HTMLInputElement>(null);
 
   return (
     <div style={styles.container as any}>
       <div style={{ marginBottom: 12 }}>
-        <div style={styles.h1 as any}>4Seasons / Gaslight — Inventory Manager</div>
-        <div style={styles.muted as any}>
-          Works offline (localStorage). {supabase ? "✅ Supabase sync ON — multi-device real-time" : "⚠️ Supabase not configured — local only"}
-        </div>
+        <div style={styles.h1 as any}>4Seasons / Gaslight — Inventory Manager (Supabase Sync)</div>
+        <div style={styles.muted as any}>Real-time sync across devices. Data stored in Supabase (free). Local cache in browser for offline.</div>
       </div>
 
-      {/* Controls */}
       <div style={styles.card as any}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Search & Filters</div>
-        <div style={{...styles.row, alignItems: "flex-end"}}>
+        <div style={{ ...styles.row, alignItems: "flex-end" }}>
           <div style={{ flex: 1, minWidth: 220 }}>
             <div>Search</div>
-            <input placeholder="Model / Serial / Notes / Location" value={q} onChange={e=>setQ(e.target.value)} style={{...styles.input, width: "100%"} as any} />
+            <input placeholder="Model / Serial / Notes / Location" value={q} onChange={e => setQ(e.target.value)} style={{ ...styles.input, width: "100%" } as any} />
           </div>
           <div>
             <div>Status</div>
-            <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)} style={styles.select as any}>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={styles.select as any}>
               <option value="all">All</option>
-              {STATUSES.map(s=> <option key={s} value={s}>{s}</option>)}
+              {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div>
             <div>Location filter</div>
-            <input placeholder="Shop / Showroom / 1619 Prairie" value={locFilter === "all" ? "" : locFilter} onChange={e=> setLocFilter(e.target.value || "all")} style={styles.input as any} />
+            <input placeholder="Shop / Showroom / 1619 Prairie" value={locFilter === "all" ? "" : locFilter} onChange={e => setLocFilter(e.target.value || "all")} style={styles.input as any} />
           </div>
         </div>
       </div>
 
-      {/* Actions */}
-      <div style={{...styles.row, marginBottom: 12}}>
-        <button style={styles.buttonPrimary as any} onClick={()=>setOpen(true)}>+ Add Item</button>
-        <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e)=>{ const f=e.target.files?.[0]; if(f) doImport(f); (e.currentTarget as any).value = ""; }} />
-        <button style={styles.button as any} onClick={()=>fileRef.current?.click()}>Import CSV</button>
+      <div style={{ ...styles.row, marginBottom: 12 }}>
+        <button style={styles.buttonPrimary as any} onClick={() => setOpen(true)}>+ New Item</button>
+        <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) doImport(f); (e.currentTarget as any).value = ""; }} />
+        <button style={styles.button as any} onClick={() => fileRef.current?.click()}>Import CSV</button>
         <button style={styles.button as any} onClick={doExport}>Export CSV (filtered)</button>
-        <span style={{ flex:1 }} />
-        <button style={styles.button as any} onClick={()=>{ setScanMode("IN"); setScanOpen(true); }}>📷 Scan IN</button>
-        <button style={styles.button as any} onClick={()=>{ setScanMode("OUT"); setScanOpen(true); }}>📷 Scan OUT</button>
+        <span style={{ flex: 1 }} />
+        <button style={styles.button as any} onClick={() => { setScanMode('IN'); setScanOpen(true); }}>📷 Scan IN</button>
+        <button style={styles.button as any} onClick={() => { setScanMode('OUT'); setScanOpen(true); }}>📷 Scan OUT</button>
       </div>
 
-      {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 12 }}>
         <div style={styles.stat as any}><div style={styles.muted as any}>Total</div><div style={{ fontSize: 22, fontWeight: 600 }}>{stats.total}</div></div>
-        {Object.entries(stats.byStatus).map(([k,v])=> (
+        {Object.entries(stats.byStatus).map(([k, v]) => (
           <div key={k} style={styles.stat as any}><div style={styles.muted as any}>{k}</div><div style={{ fontSize: 22, fontWeight: 600 }}>{v}</div></div>
         ))}
       </div>
 
-      {/* Table */}
       <div style={styles.tableWrap as any}>
         <table style={styles.table as any}>
           <thead>
@@ -524,7 +528,7 @@ export default function App(){
               <th style={styles.th as any}>Status</th>
               <th style={styles.th as any}>Location</th>
               <th style={styles.th as any}>Notes</th>
-              <th style={{...styles.th, textAlign: "right"} as any}>Cost</th>
+              <th style={{ ...styles.th, textAlign: "right" } as any}>Cost</th>
               <th style={styles.th as any}>Received</th>
               <th style={styles.th as any}>Updated</th>
               <th style={styles.th as any}>Actions</th>
@@ -534,19 +538,19 @@ export default function App(){
             {filtered.map(item => (
               <tr key={item.id}>
                 <td style={styles.td as any}><b>{item.model}</b></td>
-                <td style={styles.td as any}>{item.serial||"—"}</td>
+                <td style={styles.td as any}>{item.serial || "—"}</td>
                 <td style={styles.td as any}><span style={styles.badge as any}>{item.status}</span></td>
-                <td style={styles.td as any}>{item.location||"—"}</td>
-                <td style={{...styles.td, maxWidth: 280} as any} title={item.notes||undefined}>{item.notes||""}</td>
-                <td style={{...styles.td, textAlign: "right"} as any}>{item.cost!=null? `$${Number(item.cost).toFixed(2)}`: "—"}</td>
-                <td style={styles.td as any}>{item.receivedAt||"—"}</td>
-                <td style={{...styles.td, fontSize: 12, color: "#64748b"} as any}>{new Date(item.updatedAt).toLocaleString()}</td>
+                <td style={styles.td as any}>{item.location || "—"}</td>
+                <td style={{ ...styles.td, maxWidth: 280 } as any} title={item.notes ?? ""}>{item.notes || ""}</td>
+                <td style={{ ...styles.td, textAlign: "right" } as any}>{item.cost != null ? `$${Number(item.cost).toFixed(2)}` : "—"}</td>
+                <td style={styles.td as any}>{item.received_at || "—"}</td>
+                <td style={{ ...styles.td, fontSize: 12, color: "#64748b" } as any}>{new Date(item.updated_at).toLocaleString()}</td>
                 <td style={styles.td as any}>
                   <RowActions
                     item={item}
-                    onEdit={()=>setEditing(item)}
-                    onDelete={()=>remove(item.id)}
-                    onQuick={(patch)=>quickUpdate(item, patch)}
+                    onEdit={() => setEditing(item)}
+                    onDelete={() => remove(item.id)}
+                    onQuick={(patch) => quickUpdate(item, patch)}
                   />
                 </td>
               </tr>
@@ -555,38 +559,25 @@ export default function App(){
         </table>
       </div>
 
-      {/* Create / Edit */}
-      <Modal open={open || !!editing} title={editing? "Edit Item" : "Add Item"} onClose={()=>{ setOpen(false); setEditing(null); }}>
-        <InventoryForm initial={editing||undefined} onSubmit={upsert} />
+      <Modal open={open || !!editing} title={editing ? "Edit Item" : "New Item"} onClose={() => { setOpen(false); setEditing(null); }}>
+        <InventoryForm
+          initial={editing || undefined}
+          onSubmit={upsert}
+        />
         {editing && (
           <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between" }}>
             <span />
-            <button style={{...styles.button, borderColor:'#ef4444', color:'#ef4444'} as any} onClick={()=>{ if(editing) remove(editing.id); setEditing(null); }}>Delete</button>
+            <button style={{ ...styles.button, borderColor: '#ef4444', color: '#ef4444' } as any} onClick={() => { if (editing) remove(editing.id); setEditing(null); }}>Delete</button>
           </div>
         )}
       </Modal>
 
-      {/* Scanner */}
-      <ScannerModal open={scanOpen} mode={scanMode} onClose={()=>setScanOpen(false)} onScanned={handleScanned} />
+      <ScannerModal open={scanOpen} mode={scanMode} onClose={() => setScanOpen(false)} onScanned={handleScanned} />
 
-      {/* Tips */}
-      <div style={{...styles.muted, marginTop: 16}}>
-        Scan format accepted: <code>MODEL|SERIAL</code> or just <code>SERIAL</code>.  
-        iPhone Safari may not expose <code>BarcodeDetector</code> → manual code works.  
-        Supabase table: <code>inventory_items</code> (see README below).
+      <div style={{ ...styles.muted, marginTop: 16 }}>
+        💡 Scan rules: use <code>MODEL|SERIAL</code> or just <code>SERIAL</code>. IN creates/sets Stock; OUT sets Installed/Sold (or creates placeholder).<br/>
+        🔒 Camera needs HTTPS. With Supabase sync, all devices see the same data instantly.
       </div>
     </div>
   );
 }
-
-/* ---------- QUICK TESTS (run once) ---------- */
-(function runTests(){
-  try {
-    console.assert(csvEscape("a,b") === "\"a,b\"", "csvEscape commas");
-    console.assert(csvEscape("a\nb") === "\"a\nb\"", "csvEscape newlines");
-    const p1 = parseCSV("Model,Serial,Status\nEX22CN,NB1,Stock");
-    console.assert(p1.length===1 && p1[0].model==="EX22CN" && p1[0].serial==="NB1", "parse basic");
-    const p2 = parseCSV("Model,Serial\r\nEX22CN,NB2");
-    console.assert(p2.length===1 && p2[0].serial==="NB2", "parse CRLF");
-  } catch(e) { /* ignore */ }
-})();
