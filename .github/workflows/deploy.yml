@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: 'pages'
+  group: "pages"
   cancel-in-progress: true
 
 jobs:
@@ -25,25 +25,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Install deps
-        run: npm ci
+        run: npm install
 
       - name: Build
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: |
-          npm run build
-          # SPA fallback + disable Jekyll
-          cp ./404.html ./dist/404.html || true
-          touch ./dist/.nojekyll
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: dist
 
   deploy:
     needs: build
@@ -52,6 +47,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
