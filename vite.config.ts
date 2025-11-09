@@ -1,9 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Change 'inventory-manager' to your repo name if different
 export default defineConfig({
   plugins: [react()],
-  // Set this to your GitHub Pages repo name
-  base: '/inventory-manager/',
-  server: { host: true }
+  base: '/inventory-manager/'
 })
