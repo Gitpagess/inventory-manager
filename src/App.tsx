@@ -18,14 +18,8 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 /* =========================
    Env + Supabase bootstrap
    ========================= */
-const SUPABASE_URL =
-  (import.meta as any).env?.VITE_SUPABASE_URL ||
-  (window as any).__SUPABASE_URL__ ||
-  "";
-const SUPABASE_ANON =
-  (import.meta as any).env?.VITE_SUPABASE_ANON ||
-  (window as any).__SUPABASE_ANON__ ||
-  "";
+const SUPABASE_URL = "https://bkhkgxgmlhvjidoximyx.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";
 
 const supabase: SupabaseClient | null =
   SUPABASE_URL && SUPABASE_ANON
