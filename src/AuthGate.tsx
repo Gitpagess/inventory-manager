@@ -1,101 +1,83 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
+import App from './App' // your existing inventory app
 
-type Props = { children: React.ReactNode }
+type Session = Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']
 
-export default function AuthGate({ children }: Props) {
-  const [loading, setLoading] = useState(true)
-  const [session, setSession] = useState<null | { user: any }>(null)
+export default function AuthGate() {
+  const [session, setSession] = useState<Session | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string>('')
+  const [showForm, setShowForm] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      const { data } = await supabase.auth.getSession()
-      if (!mounted) return
-      setSession(data.session as any)
-      setLoading(false)
-    })()
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s as any)
-    })
-    return () => sub.subscription.unsubscribe()
+    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => setSession(s))
+    return () => { sub.subscription.unsubscribe() }
   }, [])
 
-  async function signIn() {
+  const signIn = async (e: React.FormEvent) => {
+    e.preventDefault()
     setError('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) setError(error.message)
   }
 
-  async function signUp() {
-    setError('')
-    const { error } = await supabase.auth.signUp({ email, password })
-    if (error) setError(error.message)
-  }
-
-  async function signOut() {
+  const signOut = async () => {
     await supabase.auth.signOut()
   }
 
-  if (loading) return <div style={{ padding: 24 }}>Loading…</div>
-
   if (!session) {
     return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f7fafc' }}>
-        <div style={{ width: 360, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Inventory Login</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>Use your email & password.</div>
-
-          <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{maxWidth: 420, margin: '14vh auto', padding: 16, fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Arial'}}>
+        <h2 style={{marginBottom: 6}}>Inventory — Sign in</h2>
+        {!showForm ? (
+          <button
+            onClick={() => setShowForm(true)}
+            style={{padding:'10px 14px', borderRadius:8, border:'1px solid #cbd5e1', background:'#f8fafc', cursor:'pointer'}}
+          >
+            Sign in
+          </button>
+        ) : (
+          <form onSubmit={signIn} style={{display:'grid', gap:10}}>
             <input
-              style={{ padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8 }}
-              placeholder="you@example.com"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
+              type="email" placeholder="Email"
+              value={email} onChange={e=>setEmail(e.target.value)}
+              style={{padding:'10px', border:'1px solid #cbd5e1', borderRadius:8}}
+              required
             />
             <input
-              type="password"
-              style={{ padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8 }}
-              placeholder="••••••••"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
+              type="password" placeholder="Password"
+              value={password} onChange={e=>setPassword(e.target.value)}
+              style={{padding:'10px', border:'1px solid #cbd5e1', borderRadius:8}}
+              required
             />
-            {error && <div style={{ color: '#b91c1c', fontSize: 12 }}>{error}</div>}
-
-            <button
-              style={{ padding: '10px 12px', background: '#2563eb', color: '#fff', border: 0, borderRadius: 8, cursor: 'pointer' }}
-              onClick={signIn}
+            {error && <div style={{color:'#b91c1c', fontSize:13}}>{error}</div>}
+            <button type="submit"
+              style={{padding:'10px 14px', borderRadius:8, border:'1px solid #2563eb', background:'#2563eb', color:'#fff', cursor:'pointer'}}
             >
-              Sign In
+              Continue
             </button>
-            <button
-              style={{ padding: '10px 12px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 8, cursor: 'pointer' }}
-              onClick={signUp}
-            >
-              Create Account
-            </button>
-          </div>
-        </div>
+            <div style={{color:'#64748b', fontSize:12}}>
+              Use the email/password you created in Supabase (Auth → Users).
+            </div>
+          </form>
+        )}
       </div>
     )
   }
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 8, borderBottom: '1px solid #e5e7eb' }}>
-        <div style={{ fontWeight: 600, flex: 1 }}>4Seasons / Gaslight — Inventory</div>
-        <div style={{ fontSize: 12, color: '#64748b' }}>{session.user?.email}</div>
-        <button
-          onClick={signOut}
-          style={{ padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff', cursor: 'pointer' }}
+      <div style={{display:'flex', justifyContent:'flex-end', padding:8}}>
+        <button onClick={signOut}
+          style={{padding:'6px 10px', borderRadius:8, border:'1px solid #cbd5e1', background:'#f8fafc', cursor:'pointer'}}
         >
           Sign out
         </button>
       </div>
-      {children}
+      <App />
     </div>
   )
 }
