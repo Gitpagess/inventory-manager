@@ -4,8 +4,8 @@ import { createClient, Session } from "@supabase/supabase-js";
 /** ===========================
  *  SUPABASE CONFIG (EDIT ME)
  *  =========================== */
-const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";        // <-- put yours
-const SUPABASE_ANON_KEY = "YOUR-ANON-KEY";                           // <-- put yours
+const SUPABASE_URL = "https://bkhkgxgmlhvjidoximyx.supabase.co";        // <-- put yours
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";                           // <-- put yours
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /** ===========================
