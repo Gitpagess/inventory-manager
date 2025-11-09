@@ -1,3 +1,64 @@
+// src/App.tsx (top of file)
+import { createClient } from '@supabase/supabase-js'
+const supabase = createClient(import.meta.env.VITE_SUPABASE_URL!, import.meta.env.VITE_SUPABASE_ANON_KEY!)
+
+export default function App() {
+  const [session, setSession] = useState<import('@supabase/supabase-js').Session | null>(null)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [msg, setMsg] = useState<string>('')
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    return () => sub.subscription.unsubscribe()
+  }, [])
+
+  async function loginPassword(e: React.FormEvent) {
+    e.preventDefault()
+    setMsg('')
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) setMsg(error.message)
+  }
+
+  async function loginMagic(e: React.FormEvent) {
+    e.preventDefault()
+    setMsg('')
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } })
+    if (error) setMsg(error.message); else setMsg('Check your email for a magic link.')
+  }
+
+  async function logout() { await supabase.auth.signOut() }
+
+  if (!session) {
+    return (
+      <div style={{maxWidth:420,margin:'4rem auto',padding:16,border:'1px solid #e5e7eb',borderRadius:12,fontFamily:'system-ui'}}>
+        <h2 style={{marginTop:0}}>Sign in</h2>
+        <form onSubmit={loginPassword}>
+          <div>Email</div>
+          <input style={{width:'100%',padding:'8px',margin:'6px 0'}} value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com" />
+          <div>Password (or leave blank to use Magic Link)</div>
+          <input type="password" style={{width:'100%',padding:'8px',margin:'6px 0'}} value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" />
+          <button style={{padding:'8px 12px',marginRight:8}}>Sign in</button>
+          <button type="button" onClick={loginMagic} style={{padding:'8px 12px'}}>Email me a Magic Link</button>
+          {msg && <div style={{marginTop:8,color:'#b91c1c'}}>{msg}</div>}
+        </form>
+      </div>
+    )
+  }
+
+  // …your existing inventory UI below…
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'flex-end',padding:'8px'}}>
+        <button onClick={logout}>Sign out ({session.user.email})</button>
+      </div>
+      {/* render the inventory app exactly as you have it now */}
+      {/* ... */}
+    </div>
+  )
+}
+
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from './supabase'
 
