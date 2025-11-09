@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
-const supabaseAnon = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+const supabaseUrl = "https://bkhkgxgmlhvjidoximyx.supabase.co";
+const supabaseAnon = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";
 export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnon)
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
