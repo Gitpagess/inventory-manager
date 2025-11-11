@@ -277,7 +277,7 @@ function InventoryForm({
           style={styles.input as any}
           value={location}
           onChange={(e) => setLocation(e.target.value)}
-          placeholder="Shop / Showroom / 1619 Prairie"
+          placeholder="Shop / Showroom"
         />
       </div>
       <div style={{ gridColumn: "1 / span 2" }}>
@@ -286,7 +286,7 @@ function InventoryForm({
           style={{ ...(styles.input as any), width: "100%", minHeight: 64 }}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Purchase, dates, who handled it (e.g., Sylvia)"
+          placeholder="Purchase, dates, who handled it (e.g., CG)"
         />
       </div>
       <div>
@@ -823,7 +823,7 @@ export default function App() {
           <div>
             <div>Location filter</div>
             <input
-              placeholder="Shop / Showroom / 1619 Prairie"
+              placeholder="Shop / Showroom"
               value={locFilter === "all" ? "" : locFilter}
               onChange={(e) => setLocFilter(e.target.value || "all")}
               style={styles.input as any}
