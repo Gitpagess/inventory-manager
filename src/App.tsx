@@ -9,12 +9,8 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
  */
 
 // ------------------ CONFIG ------------------
-const SUPABASE_URL =
-  (import.meta as any)?.env?.VITE_SUPABASE_URL || (window as any).SUPABASE_URL || "";
-const SUPABASE_ANON_KEY =
-  (import.meta as any)?.env?.VITE_SUPABASE_ANON_KEY ||
-  (window as any).SUPABASE_ANON_KEY ||
-  "";
+const SUPABASE_URL ="https://bkhkgxgmlhvjidoximyx.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";
 
 // Turn this on if you want the app to seed the UI when DB is empty
 const USE_SEED_ON_EMPTY = true;
