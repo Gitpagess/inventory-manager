@@ -1,27 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient, Session } from "@supabase/supabase-js";
 
 /**
- * Inventory App — Supabase + Login (email/password only) + Scanner
- * - No signup UI (login only)
- * - Realtime sync (insert/update/delete)
+ * Inventory App — Supabase + Login + Scanner + CSV
+ * -----------------------------------------------------------
+ * - Email/password **login page** (no sign-up link)
+ * - Supabase sync to public.inventory (snake_case in DB)
+ * - Scanner IN / OUT (BarcodeDetector, with manual fallback)
  * - CSV import/export
- * - Barcode scan IN/OUT (BarcodeDetector with manual fallback)
- * - Maps camelCase (UI) <-> snake_case (Postgres)
+ * - Clear errors shown in UI (no blank screen)
  *
- * ENV: Tries Vite vars first, then window globals (for GitHub Pages)
- *   VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
- *   or window.SUPABASE_URL / window.SUPABASE_ANON_KEY
+ * ENV (for static hosts like GitHub Pages):
+ *   In your index.html, set:
+ *     <script>
+ *       window.SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
+ *       window.SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+ *     </script>
  */
 
-const SUPABASE_URL =
-  (import.meta as any)?.env?.VITE_SUPABASE_URL ||
-  (window as any).SUPABASE_URL ||
-  "https://bkhkgxgmlhvjidoximyx.supabase.co";
-const SUPABASE_ANON_KEY =
-  (import.meta as any)?.env?.VITE_SUPABASE_ANON_KEY ||
-  (window as any).SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";
+const SUPABASE_URL = "https://bkhkgxgmlhvjidoximyx.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";
 
 // ---------- Types ----------
 const STATUSES = [
@@ -44,31 +42,62 @@ export type Item = {
   notes?: string;
   cost?: number;
   receivedAt?: string; // YYYY-MM-DD
-  updatedAt: string; // ISO
+  updatedAt: string; // ISO string
 };
 
-// ---------- Utils ----------
+// ---------- Helpers ----------
 const uuid = () =>
   (globalThis.crypto?.randomUUID
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now());
 const nowIso = () => new Date().toISOString();
 
-// Local cache (for snappy UX/offline)
-const LS_KEY = "inventory-manager-v3";
+const STORAGE_KEY = "inventory-manager-auth-v1";
 const loadLocal = (): Item[] => {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? (JSON.parse(raw) as Item[]) : [];
   } catch {
     return [];
   }
 };
-const saveLocal = (rows: Item[]) =>
-  localStorage.setItem(LS_KEY, JSON.stringify(rows));
+const saveLocal = (items: Item[]) =>
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 
-// CSV helpers
-function csvEscape(v: string | number | undefined | null) {
+// camel ⇄ snake mappers (UI uses camelCase, DB uses snake_case)
+function toDb(i: Item) {
+  return {
+    id: i.id,
+    model: i.model,
+    serial: i.serial ?? null,
+    status: i.status,
+    location: i.location ?? null,
+    notes: i.notes ?? null,
+    cost: i.cost ?? null,
+    received_at: i.receivedAt ?? null,
+    updated_at: i.updatedAt,
+  };
+}
+function fromDb(r: any): Item {
+  return {
+    id: r.id,
+    model: r.model,
+    serial: r.serial ?? undefined,
+    status: (r.status as Status) ?? "Stock",
+    location: r.location ?? undefined,
+    notes: r.notes ?? undefined,
+    cost:
+      typeof r.cost === "number"
+        ? r.cost
+        : r.cost
+        ? Number(r.cost)
+        : undefined,
+    receivedAt: r.received_at ?? undefined,
+    updatedAt: r.updated_at ?? nowIso(),
+  };
+}
+
+function csvEscape(v: string | number | undefined) {
   if (v === undefined || v === null) return "";
   const s = String(v);
   return /[",\n]/.test(s) ? '"' + s.replaceAll('"', '""') + '"' : s;
@@ -110,12 +139,13 @@ function downloadCSV(filename: string, rows: Item[]) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
 function parseCSV(text: string): Item[] {
   const lines = text.trim().split(/\r?\n/);
   if (!lines.length) return [];
   const header = lines[0].split(",").map((s) => s.trim().toLowerCase());
   const idx = (name: string) => header.indexOf(name.toLowerCase());
-  const out: Item[] = [];
+  const items: Item[] = [];
   for (let i = 1; i < lines.length; i++) {
     const row = lines[i];
     const cols = row.match(/([^",]+|"(?:[^"]|"")*")+/g) || [];
@@ -127,7 +157,7 @@ function parseCSV(text: string): Item[] {
         ? raw.slice(1, -1).replaceAll('""', '"')
         : raw;
     };
-    out.push({
+    items.push({
       id: uuid(),
       model: get("Model") || "UNKNOWN",
       serial: get("Serial") || undefined,
@@ -139,45 +169,16 @@ function parseCSV(text: string): Item[] {
       updatedAt: nowIso(),
     });
   }
-  return out;
+  return items;
 }
 
-// DB mappers camel ⇄ snake
-function toDb(i: Item) {
-  return {
-    id: i.id,
-    model: i.model,
-    serial: i.serial ?? null,
-    status: i.status,
-    location: i.location ?? null,
-    notes: i.notes ?? null,
-    cost: i.cost ?? null,
-    received_at: i.receivedAt ?? null,
-    updated_at: i.updatedAt, // always set
-  };
-}
-function fromDb(r: any): Item {
-  return {
-    id: r.id,
-    model: r.model,
-    serial: r.serial ?? undefined,
-    status: (r.status as Status) ?? "Stock",
-    location: r.location ?? undefined,
-    notes: r.notes ?? undefined,
-    cost:
-      typeof r.cost === "number" ? r.cost : r.cost ? Number(r.cost) : undefined,
-    receivedAt: r.received_at ?? undefined,
-    updatedAt: r.updated_at ?? nowIso(),
-  };
-}
-
-// ---------- UI bits ----------
+// ---------- Minimal UI styles ----------
 const styles = {
   container: {
     maxWidth: 1100,
     margin: "0 auto",
     padding: 16,
-    fontFamily: "system-ui,-apple-system,Segoe UI,Roboto,Arial",
+    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
   },
   h1: { fontSize: 22, margin: "8px 0 4px" },
   muted: { color: "#666", fontSize: 12 },
@@ -193,11 +194,7 @@ const styles = {
     alignItems: "center",
     flexWrap: "wrap" as const,
   },
-  input: {
-    padding: "8px 10px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 8,
-  },
+  input: { padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8 },
   select: {
     padding: "8px 10px",
     border: "1px solid #cbd5e1",
@@ -224,66 +221,185 @@ const styles = {
     boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
   },
   table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 14 },
-  th: { textAlign: "left" as const, padding: 12, background: "#f8fafc", color: "#475569" },
+  th: {
+    textAlign: "left" as const,
+    padding: 12,
+    background: "#f8fafc",
+    color: "#475569",
+  },
   td: { padding: 12, borderTop: "1px solid #f1f5f9" },
-  badge: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "2px 8px", fontSize: 12 },
-  stat: { border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, textAlign: "center" as const },
+  badge: {
+    border: "1px solid #cbd5e1",
+    borderRadius: 999,
+    padding: "2px 8px",
+    fontSize: 12,
+  },
+  stat: {
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    padding: 12,
+    textAlign: "center" as const,
+  },
 };
 
-// Login form (NO signup)
-function SignIn({
-  onSignedIn,
-  supa,
+// ---------- Scanner ----------
+function ScannerModal({
+  open,
+  mode,
+  onClose,
+  onScanned,
 }: {
-  onSignedIn: () => void;
-  supa: SupabaseClient;
+  open: boolean;
+  mode: "IN" | "OUT";
+  onClose: () => void;
+  onScanned: (code: string) => void;
 }) {
-  const [email, setEmail] = useState("");
-  const [pw, setPw] = useState("");
-  const [err, setErr] = useState<string>("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [supported, setSupported] = useState(false);
+  const [error, setError] = useState("");
+  const [manual, setManual] = useState("");
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number | undefined>(undefined);
 
-  const doLogin = async () => {
-    setErr("");
-    const { error } = await supa.auth.signInWithPassword({ email, password: pw });
-    if (error) setErr(error.message);
-    else onSignedIn();
-  };
+  useEffect(() => {
+    if (!open) return;
+    setError("");
+    setManual("");
+    let cancelled = false;
+    (async () => {
+      try {
+        const hasBarcode =
+          typeof (globalThis as any).BarcodeDetector !== "undefined";
+        setSupported(hasBarcode);
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+        });
+        if (cancelled) return;
+        streamRef.current = stream;
+        if (videoRef.current) {
+          (videoRef.current as any).srcObject = stream;
+          await (videoRef.current as any).play();
+        }
+        if (hasBarcode) {
+          const detector = new (window as any).BarcodeDetector({
+            formats: ["qr_code", "code_128", "ean_13", "ean_8", "upc_a", "upc_e"],
+          });
+          const tick = async () => {
+            try {
+              if (videoRef.current) {
+                const results = await detector.detect(videoRef.current);
+                if (results && results.length) {
+                  const payload =
+                    results[0].rawValue || results[0].cornerPoints?.toString();
+                  if (payload) {
+                    onScanned(String(payload));
+                  }
+                }
+              }
+            } catch {
+              /* ignore per frame errors */
+            }
+            rafRef.current = requestAnimationFrame(tick);
+          };
+          rafRef.current = requestAnimationFrame(tick);
+        }
+      } catch (e: any) {
+        setError(e?.message || "Camera access failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      const s = streamRef.current;
+      streamRef.current = null;
+      if (s) s.getTracks().forEach((t) => t.stop());
+    };
+  }, [open]);
 
+  if (!open) return null;
   return (
-    <div style={{ ...styles.card, maxWidth: 420, margin: "10vh auto" }}>
-      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
-        Sign in to Inventory
-      </div>
-      <div style={{ marginBottom: 8 }}>Email</div>
-      <input
-        style={{ ...styles.input, width: "100%" } as any}
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="you@example.com"
-      />
-      <div style={{ marginTop: 12, marginBottom: 8 }}>Password</div>
-      <input
-        type="password"
-        style={{ ...styles.input, width: "100%" } as any}
-        value={pw}
-        onChange={(e) => setPw(e.target.value)}
-        placeholder="••••••••"
-      />
-      {err && (
-        <div style={{ color: "#b91c1c", fontSize: 13, marginTop: 8 }}>{err}</div>
-      )}
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
-        <button style={styles.buttonPrimary as any} onClick={doLogin}>
-          Sign In
-        </button>
-      </div>
-      <div style={{ ...styles.muted, marginTop: 10 }}>
-        No signup here. Create users in Supabase Auth only.
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 60,
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 12,
+          width: "min(720px,95vw)",
+          padding: 16,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>
+            Scan to {mode === "IN" ? "ADD (IN)" : "REMOVE (OUT)"} inventory
+          </div>
+          <button style={styles.button as any} onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+          {supported ? (
+            <div>
+              <video
+                ref={videoRef}
+                style={{ width: "100%", borderRadius: 12, background: "#000" }}
+                muted
+                playsInline
+              />
+              <div style={{ ...(styles.muted as any), marginTop: 6 }}>
+                Tip: QR/Code128/EAN/UPC supported. HTTPS required on phones.
+              </div>
+            </div>
+          ) : (
+            <div style={styles.muted as any}>
+              BarcodeDetector not supported in this browser. Use manual entry
+              below.
+            </div>
+          )}
+          {!!error && (
+            <div style={{ color: "#b91c1c", fontSize: 13 }}>Camera error: {error}</div>
+          )}
+          <div>
+            <div style={{ marginBottom: 6 }}>Manual code (fallback)</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={manual}
+                onChange={(e) => setManual(e.target.value)}
+                placeholder="Scan code or type here"
+                style={{ ...(styles.input as any), flex: 1 }}
+              />
+              <button
+                style={styles.buttonPrimary as any}
+                onClick={() => {
+                  if (manual.trim()) onScanned(manual.trim());
+                }}
+              >
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
+// ---------- Small UI blocks ----------
 function InventoryForm({
   initial,
   onSubmit,
@@ -347,7 +463,7 @@ function InventoryForm({
       <div style={{ gridColumn: "1 / span 2" }}>
         <div>Notes</div>
         <textarea
-          style={{ ...styles.input, width: "100%", minHeight: 64 } as any}
+          style={{ ...(styles.input as any), width: "100%", minHeight: 64 }}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Purchase, dates, who handled it (e.g., Sylvia)"
@@ -373,12 +489,7 @@ function InventoryForm({
         />
       </div>
       <div
-        style={{
-          gridColumn: "1 / span 2",
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: 8,
-        }}
+        style={{ gridColumn: "1 / span 2", display: "flex", justifyContent: "flex-end", gap: 8 }}
       >
         <button
           style={styles.buttonPrimary as any}
@@ -439,170 +550,77 @@ function RowActions({
   );
 }
 
-function ScannerModal({
-  open,
-  mode,
-  onClose,
-  onScanned,
-}: {
-  open: boolean;
-  mode: "IN" | "OUT";
-  onClose: () => void;
-  onScanned: (code: string) => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [supported, setSupported] = useState<boolean>(false);
-  const [error, setError] = useState<string>("");
-  const [manual, setManual] = useState<string>("");
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number | undefined>(undefined);
+// ---------- Auth Gate ----------
+function LoginView({ supa }: { supa: SupabaseClient }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
 
-  useEffect(() => {
-    if (!open) return;
-    setError("");
-    setManual("");
-    let cancelled = false;
-    (async () => {
-      try {
-        const hasBarcode = typeof (globalThis as any).BarcodeDetector !== "undefined";
-        setSupported(hasBarcode);
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-        });
-        if (cancelled) return;
-        streamRef.current = stream;
-        if (videoRef.current) {
-          (videoRef.current as any).srcObject = stream;
-          await (videoRef.current as any).play();
-        }
-        if (hasBarcode) {
-          const detector = new (window as any).BarcodeDetector({
-            formats: ["qr_code", "code_128", "ean_13", "ean_8", "upc_a", "upc_e"],
-          });
-          const tick = async () => {
-            try {
-              if (videoRef.current) {
-                const results = await detector.detect(videoRef.current);
-                if (results && results.length) {
-                  const payload =
-                    results[0].rawValue || results[0].cornerPoints?.toString();
-                  if (payload) onScanned(String(payload));
-                }
-              }
-            } catch {
-              // ignore per-frame errors
-            }
-            rafRef.current = requestAnimationFrame(tick);
-          };
-          rafRef.current = requestAnimationFrame(tick);
-        }
-      } catch (e: any) {
-        setError(e?.message || "Camera access failed");
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      const s = streamRef.current;
-      streamRef.current = null;
-      if (s) s.getTracks().forEach((t) => t.stop());
-    };
-  }, [open]);
+  async function signIn() {
+    setErr("");
+    const { error } = await supa.auth.signInWithPassword({ email, password });
+    if (error) setErr(error.message);
+  }
 
-  if (!open) return null;
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.45)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 60,
-      }}
-    >
-      <div style={{ background: "#fff", borderRadius: 12, width: "min(720px,95vw)", padding: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontWeight: 700 }}>
-            Scan to {mode === "IN" ? "ADD (IN)" : "REMOVE (OUT)"} inventory
-          </div>
-          <button style={styles.button as any} onClick={onClose}>
-            ✕
-          </button>
+    <div style={{ ...styles.container, maxWidth: 420 }}>
+      <div style={{ ...(styles.card as any) }}>
+        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Sign in</div>
+        <div style={{ marginBottom: 8, ...styles.muted as any }}>
+            Email/password only. No account creation from this page.
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
-          {supported ? (
-            <div>
-              <video
-                ref={videoRef}
-                style={{ width: "100%", borderRadius: 12, background: "#000" }}
-                muted
-                playsInline
-              />
-              <div style={{ ...styles.muted, marginTop: 6 }}>
-                Tip: QR/Code128/EAN/UPC supported. HTTPS is required on phones.
-              </div>
-            </div>
-          ) : (
-            <div style={{ ...styles.muted }}>
-              BarcodeDetector not supported. Use manual input below.
-            </div>
-          )}
-          {!!error && <div style={{ color: "#b91c1c", fontSize: 13 }}>Camera error: {error}</div>}
-          <div>
-            <div style={{ marginBottom: 6 }}>Manual code (fallback)</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                value={manual}
-                onChange={(e) => setManual(e.target.value)}
-                placeholder="Scan code or type here"
-                style={{ ...(styles.input as any), flex: 1 }}
-              />
-              <button
-                style={styles.buttonPrimary as any}
-                onClick={() => {
-                  if (manual.trim()) onScanned(manual.trim());
-                }}
-              >
-                Submit
-              </button>
-            </div>
+        <div style={{ marginBottom: 8 }}>Email</div>
+        <input
+          style={{ ...(styles.input as any), width: "100%", marginBottom: 8 }}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          autoComplete="username"
+        />
+        <div style={{ marginBottom: 8 }}>Password</div>
+        <input
+          type="password"
+          style={{ ...(styles.input as any), width: "100%", marginBottom: 12 }}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="••••••••"
+          autoComplete="current-password"
+        />
+        {err && (
+          <div style={{ color: "#b91c1c", fontSize: 13, marginBottom: 8 }}>
+            {err}
           </div>
-        </div>
+        )}
+        <button style={styles.buttonPrimary as any} onClick={signIn}>Sign in</button>
       </div>
     </div>
   );
 }
 
-// Helpers
-function findBySerial(items: Item[], serial: string) {
-  return items.find((i) => (i.serial || "").toLowerCase() === serial.toLowerCase());
-}
-function createFromCode(code: string): Partial<Item> {
-  let model = "";
-  let serial = code.trim();
-  if (code.includes("|")) {
-    const [m, s] = code.split("|");
-    model = (m || "").trim();
-    serial = (s || "").trim();
-  }
-  return { model: model || "UNKNOWN", serial };
-}
-
-// ---------- App ----------
+// ---------- Main App ----------
 export default function App() {
+  const [fatal, setFatal] = useState<string>("");
+
+  // Create client (guard for missing env)
   const supa: SupabaseClient | null = useMemo(() => {
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
-    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: true },
-      realtime: { params: { eventsPerSecond: 10 } },
-    });
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      setFatal(
+        "Supabase env missing. Define window.SUPABASE_URL and window.SUPABASE_ANON_KEY in index.html."
+      );
+      return null;
+    }
+    try {
+      return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: { persistSession: false },
+      });
+    } catch (e: any) {
+      setFatal(e?.message || "Failed to init Supabase client");
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [sessionReady, setSessionReady] = useState(false);
-  const [authed, setAuthed] = useState(false);
-
+  const [session, setSession] = useState<Session | null>(null);
   const [items, setItems] = useState<Item[]>(loadLocal());
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -613,85 +631,35 @@ export default function App() {
   const [scanMode, setScanMode] = useState<"IN" | "OUT">("IN");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Auth bootstrap
+  // Auth state
   useEffect(() => {
-    if (!supa) {
-      setSessionReady(true); // local-only
-      return;
-    }
+    if (!supa) return;
     (async () => {
       const { data } = await supa.auth.getSession();
-      setAuthed(!!data.session);
-      setSessionReady(true);
-      supa.auth.onAuthStateChange((_evt, sess) => {
-        setAuthed(!!sess);
-      });
+      setSession(data.session ?? null);
+      supa.auth.onAuthStateChange((_evt, s) => setSession(s));
     })();
   }, [supa]);
 
-  // Initial load & realtime
+  // Initial select
   useEffect(() => {
-    if (!supa || !authed) return;
+    if (!supa || !session) return;
     (async () => {
       const { data, error } = await supa
         .from("inventory")
         .select("*")
         .order("updated_at", { ascending: false });
-      if (!error && data) {
-        const mapped = data.map(fromDb);
-        setItems(mapped);
-        saveLocal(mapped);
+      if (error) {
+        setFatal("DB select error: " + error.message);
+        return;
       }
+      const mapped = (data || []).map(fromDb);
+      setItems(mapped);
+      saveLocal(mapped);
     })();
+  }, [supa, session]);
 
-    // realtime (insert/update/delete)
-    const chan = supa
-      .channel("inventory_changes")
-      .on(
-        "postgres_changes",
-        { schema: "public", table: "inventory", event: "INSERT" },
-        (payload) => {
-          const row = fromDb(payload.new as any);
-          setItems((prev) => {
-            if (prev.find((p) => p.id === row.id)) return prev;
-            const next = [row, ...prev];
-            saveLocal(next);
-            return next;
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        { schema: "public", table: "inventory", event: "UPDATE" },
-        (payload) => {
-          const row = fromDb(payload.new as any);
-          setItems((prev) => {
-            const next = prev.map((p) => (p.id === row.id ? row : p));
-            saveLocal(next);
-            return next;
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        { schema: "public", table: "inventory", event: "DELETE" },
-        (payload) => {
-          const id = (payload.old as any).id as string;
-          setItems((prev) => {
-            const next = prev.filter((p) => p.id !== id);
-            saveLocal(next);
-            return next;
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supa.removeChannel(chan);
-    };
-  }, [supa, authed]);
-
-  // Persist cached items
+  // Persist locally always
   useEffect(() => {
     saveLocal(items);
   }, [items]);
@@ -720,34 +688,36 @@ export default function App() {
     return { byStatus, total: filtered.length };
   }, [filtered]);
 
-  // DB ops
   async function dbUpsert(it: Item) {
-    if (!supa || !authed) return;
+    if (!supa) return;
     const row = toDb(it);
     const { error } = await supa.from("inventory").upsert(row, { onConflict: "id" });
-    if (error) console.error("upsert error", error);
+    if (error) setFatal("DB upsert error: " + error.message);
   }
   async function dbDelete(id: string) {
-    if (!supa || !authed) return;
+    if (!supa) return;
     const { error } = await supa.from("inventory").delete().eq("id", id);
-    if (error) console.error("delete error", error);
+    if (error) setFatal("DB delete error: " + error.message);
   }
 
   const upsert = (it: Item) => {
     setItems((prev) => {
       const idx = prev.findIndex((p) => p.id === it.id);
-      const next = idx >= 0 ? [...prev.slice(0, idx), it, ...prev.slice(idx + 1)] : [it, ...prev];
+      const next =
+        idx >= 0 ? [...prev.slice(0, idx), it, ...prev.slice(idx + 1)] : [it, ...prev];
       return next;
     });
     dbUpsert(it);
     setEditing(null);
     setOpen(false);
   };
+
   const quickUpdate = (item: Item, patch: Partial<Item>) => {
     const updated: Item = { ...item, ...patch, updatedAt: nowIso() };
     setItems((prev) => prev.map((p) => (p.id === item.id ? updated : p)));
     dbUpsert(updated);
   };
+
   const remove = (id: string) => {
     setItems((prev) => prev.filter((p) => p.id !== id));
     dbDelete(id);
@@ -755,102 +725,103 @@ export default function App() {
 
   const doExport = () =>
     downloadCSV(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, filtered);
+
   const doImport = async (file: File) => {
     const text = await file.text();
     const imported = parseCSV(text);
     if (!imported.length) return;
     const merged = [...imported, ...items];
     setItems(merged);
-    if (supa && authed) {
-      const { error } = await supa
-        .from("inventory")
-        .upsert(imported.map(toDb), { onConflict: "id" });
-      if (error) console.error("bulk upsert", error);
+    if (supa) {
+      const rows = imported.map(toDb);
+      const { error } = await supa.from("inventory").upsert(rows, { onConflict: "id" });
+      if (error) setFatal("Bulk upsert error: " + error.message);
     }
   };
 
-  // Scan
+  // ---- Scan handling ----
   const handleScanned = (code: string) => {
     setScanOpen(false);
     const now = nowIso();
+    const exists = items.find(
+      (i) => (i.serial || "").toLowerCase() === code.toLowerCase()
+    );
+
     if (scanMode === "IN") {
-      const exists = findBySerial(items, code);
       if (exists) {
         quickUpdate(exists, { status: "Stock" });
       } else {
-        const base = createFromCode(code);
-        const row: Item = {
+        const [m, s] = code.includes("|") ? code.split("|") : ["", code];
+        const newItem: Item = {
           id: uuid(),
-          model: base.model || "UNKNOWN",
-          serial: base.serial,
+          model: (m || "UNKNOWN").trim(),
+          serial: (s || code).trim(),
           status: "Stock",
           updatedAt: now,
-        } as Item;
-        setItems((prev) => [row, ...prev]);
-        dbUpsert(row);
+        };
+        setItems((prev) => [newItem, ...prev]);
+        dbUpsert(newItem);
       }
     } else {
-      const exists = findBySerial(items, code);
       if (exists) {
         quickUpdate(exists, { status: "Installed/Sold" });
       } else {
-        const base = createFromCode(code);
-        const row: Item = {
+        const [m, s] = code.includes("|") ? code.split("|") : ["", code];
+        const newItem: Item = {
           id: uuid(),
-          model: base.model || "UNKNOWN",
-          serial: base.serial,
+          model: (m || "UNKNOWN").trim(),
+          serial: (s || code).trim(),
           status: "Installed/Sold",
           notes: "Scanned OUT (placeholder)",
           updatedAt: now,
-        } as Item;
-        setItems((prev) => [row, ...prev]);
-        dbUpsert(row);
+        };
+        setItems((prev) => [newItem, ...prev]);
+        dbUpsert(newItem);
       }
     }
   };
 
-  // Render
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  // ---------- RENDER ----------
+  if (fatal) {
     return (
-      <div style={{ ...styles.container, maxWidth: 680 }}>
-        <h2>Supabase env missing</h2>
-        <div style={styles.muted as any}>
-          Define <code>VITE_SUPABASE_URL</code> & <code>VITE_SUPABASE_ANON_KEY</code> (or
-          set <code>window.SUPABASE_URL</code> / <code>window.SUPABASE_ANON_KEY</code> in
-          index.html) to enable login & sync.
+      <div style={{ ...styles.container, color: "#b91c1c" as any }}>
+        <div style={{ ...(styles.card as any) }}>
+          <b>Error</b>
+          <div style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{fatal}</div>
         </div>
       </div>
     );
   }
 
-  if (!sessionReady) {
-    return <div style={{ ...styles.container }}>Loading…</div>;
+  if (!supa) {
+    return (
+      <div style={{ ...styles.container }}>
+        <div style={{ ...(styles.card as any), color: "#b91c1c" }}>
+          Supabase client not initialized. Set <code>window.SUPABASE_URL</code> and{" "}
+          <code>window.SUPABASE_ANON_KEY</code> in <code>index.html</code>.
+        </div>
+      </div>
+    );
   }
 
-  if (!authed && supa) {
-    return <SignIn supa={supa} onSignedIn={() => setAuthed(true)} />;
-  }
+  if (!session) return <LoginView supa={supa} />;
 
   return (
     <div style={styles.container as any}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 12, gap: 8 }}>
-        <div style={styles.h1 as any}>4Seasons / Gaslight — Inventory Manager</div>
-        <div style={{ flex: 1 }} />
-        {supa && (
-          <button
-            style={styles.button as any}
-            onClick={async () => {
-              await supa.auth.signOut();
-              setAuthed(false);
-            }}
-          >
-            Sign out
-          </button>
-        )}
-      </div>
-      <div style={styles.muted as any}>
-        Supabase sync + realtime. Columns mapped to <code>received_at</code> /
-        <code>updated_at</code>. No <code>owner</code> column required.
+      <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={styles.h1 as any}>Inventory Manager</div>
+        <span style={{ ...styles.muted as any, marginLeft: 8 }}>
+          (signed in)
+        </span>
+        <span style={{ flex: 1 }} />
+        <button
+          style={styles.button as any}
+          onClick={() => {
+            supa.auth.signOut();
+          }}
+        >
+          Sign out
+        </button>
       </div>
 
       {/* Controls */}
@@ -1008,40 +979,39 @@ export default function App() {
         </table>
       </div>
 
-      {/* Modals */}
-      <div>
-        <Modal
-          open={open || !!editing}
-          title={editing ? "Edit Item" : "Add Item"}
-          onClose={() => {
-            setOpen(false);
-            setEditing(null);
-          }}
-        >
-          <InventoryForm initial={editing || undefined} onSubmit={upsert} />
-          {editing && (
-            <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between" }}>
-              <span />
-              <button
-                style={{ ...(styles.button as any), borderColor: "#ef4444", color: "#ef4444" }}
-                onClick={() => {
-                  if (editing) remove(editing.id);
-                  setEditing(null);
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          )}
-        </Modal>
+      {/* Edit / Create Modal */}
+      <Modal
+        open={open || !!editing}
+        title={editing ? "Edit Item" : "Add Item"}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+      >
+        <InventoryForm initial={editing || undefined} onSubmit={upsert} />
+        {editing && (
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between" }}>
+            <span />
+            <button
+              style={{ ...(styles.button as any), borderColor: "#ef4444", color: "#ef4444" }}
+              onClick={() => {
+                if (editing) remove(editing.id);
+                setEditing(null);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+      </Modal>
 
-        <ScannerModal
-          open={scanOpen}
-          mode={scanMode}
-          onClose={() => setScanOpen(false)}
-          onScanned={handleScanned}
-        />
-      </div>
+      {/* Scanner Modal */}
+      <ScannerModal
+        open={scanOpen}
+        mode={scanMode}
+        onClose={() => setScanOpen(false)}
+        onScanned={handleScanned}
+      />
     </div>
   );
 }
