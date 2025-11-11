@@ -1,27 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createClient, SupabaseClient, Session } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Inventory App — Supabase + Login + Scanner + CSV
- * -----------------------------------------------------------
- * - Email/password **login page** (no sign-up link)
- * - Supabase sync to public.inventory (snake_case in DB)
- * - Scanner IN / OUT (BarcodeDetector, with manual fallback)
- * - CSV import/export
- * - Clear errors shown in UI (no blank screen)
- *
- * ENV (for static hosts like GitHub Pages):
- *   In your index.html, set:
- *     <script>
- *       window.SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
- *       window.SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
- *     </script>
+ * Inventory App — Supabase + Email/Password sign-in
+ * - Fixes "Modal is not defined" by including Modal here.
+ * - No owner column, schema uses snake_case; UI uses camelCase and maps.
+ * - Scanner (BarcodeDetector) + manual fallback.
  */
 
-const SUPABASE_URL = "https://bkhkgxgmlhvjidoximyx.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraGtneGdtbGh2amlkb3hpbXl4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1ODU2NjYsImV4cCI6MjA3ODE2MTY2Nn0.56GAQbU5vFYtBZwz8vFYTj8tttzEdKcwvQRjd8yz8WI";
+// ------------------ CONFIG ------------------
+const SUPABASE_URL =
+  (import.meta as any)?.env?.VITE_SUPABASE_URL || (window as any).SUPABASE_URL || "";
+const SUPABASE_ANON_KEY =
+  (import.meta as any)?.env?.VITE_SUPABASE_ANON_KEY ||
+  (window as any).SUPABASE_ANON_KEY ||
+  "";
 
-// ---------- Types ----------
+// Turn this on if you want the app to seed the UI when DB is empty
+const USE_SEED_ON_EMPTY = true;
+
+// ------------------ TYPES ------------------
 const STATUSES = [
   "Stock",
   "Display",
@@ -34,25 +32,25 @@ const STATUSES = [
 type Status = typeof STATUSES[number];
 
 export type Item = {
-  id: string; // uuid
+  id: string;            // uuid
   model: string;
   serial?: string;
   status: Status;
   location?: string;
   notes?: string;
   cost?: number;
-  receivedAt?: string; // YYYY-MM-DD
-  updatedAt: string; // ISO string
+  receivedAt?: string;   // YYYY-MM-DD
+  updatedAt: string;     // ISO
 };
 
-// ---------- Helpers ----------
+// ------------------ UTILS ------------------
 const uuid = () =>
   (globalThis.crypto?.randomUUID
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now());
 const nowIso = () => new Date().toISOString();
 
-const STORAGE_KEY = "inventory-manager-auth-v1";
+const STORAGE_KEY = "inventory-manager-v2";
 const loadLocal = (): Item[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -64,7 +62,6 @@ const loadLocal = (): Item[] => {
 const saveLocal = (items: Item[]) =>
   localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 
-// camel ⇄ snake mappers (UI uses camelCase, DB uses snake_case)
 function toDb(i: Item) {
   return {
     id: i.id,
@@ -87,11 +84,7 @@ function fromDb(r: any): Item {
     location: r.location ?? undefined,
     notes: r.notes ?? undefined,
     cost:
-      typeof r.cost === "number"
-        ? r.cost
-        : r.cost
-        ? Number(r.cost)
-        : undefined,
+      typeof r.cost === "number" ? r.cost : r.cost ? Number(r.cost) : undefined,
     receivedAt: r.received_at ?? undefined,
     updatedAt: r.updated_at ?? nowIso(),
   };
@@ -139,7 +132,6 @@ function downloadCSV(filename: string, rows: Item[]) {
   a.click();
   URL.revokeObjectURL(url);
 }
-
 function parseCSV(text: string): Item[] {
   const lines = text.trim().split(/\r?\n/);
   if (!lines.length) return [];
@@ -172,234 +164,83 @@ function parseCSV(text: string): Item[] {
   return items;
 }
 
-// ---------- Minimal UI styles ----------
+// ------------------ SEED (optional) ------------------
+const seedData: Item[] = [
+  { id: uuid(), model: "EX11CN", status: "Stock", notes: "Sylvia", updatedAt: nowIso() },
+  { id: uuid(), model: "EX11CN", status: "Stock", notes: "Sylvia", updatedAt: nowIso() },
+  { id: uuid(), model: "EX11CN", status: "Stock", notes: "Sylvia", updatedAt: nowIso() },
+  { id: uuid(), model: "EX17CN", status: "Open Box", location: "take back from 1614 Allison", notes: "Sylvia", updatedAt: nowIso() },
+  { id: uuid(), model: "EX17CN", status: "Display", location: "Showroom Display", notes: "Showroom", updatedAt: nowIso() },
+  { id: uuid(), model: "EX22CN", serial: "NB.LB-003680", status: "Stock", notes: "Sylvia", updatedAt: nowIso() },
+  { id: uuid(), model: "EX22CN", serial: "NB.LB-003006", status: "Stock", location: "Shop — 1619 Prairie (10-7533)", notes: "Aug 25", updatedAt: nowIso() },
+  { id: uuid(), model: "EX22CN", serial: "24397", status: "Stock", location: "Shop", notes: "July 23 — new stock at shop, finally sale", updatedAt: nowIso() },
+  { id: uuid(), model: "EX22CN", serial: "NB.LB-003008", status: "Stock", location: "Shop", notes: "July 23 — new stock at shop, finally sale", updatedAt: nowIso() },
+  { id: uuid(), model: "AR9T960603BN", serial: "2505267633", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: nowIso() },
+  { id: uuid(), model: "AR9T960603BN", serial: "2505272372", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: nowIso() },
+  { id: uuid(), model: "AR9T960603BN", serial: "2505272374", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: nowIso() },
+  { id: uuid(), model: "AMVM970803BN", serial: "2411115464", status: "Stock", location: "Shop", notes: "10-10", updatedAt: nowIso() },
+  { id: uuid(), model: "AMVM970803BN", serial: "2411115465", status: "Stock", location: "Shop", notes: "10-10", updatedAt: nowIso() },
+];
+
+// ------------------ STYLES ------------------
 const styles = {
-  container: {
-    maxWidth: 1100,
-    margin: "0 auto",
-    padding: 16,
-    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
-  },
+  container: { maxWidth: 1100, margin: "0 auto", padding: 16, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial" },
   h1: { fontSize: 22, margin: "8px 0 4px" },
   muted: { color: "#666", fontSize: 12 },
-  card: {
-    border: "1px solid #e5e7eb",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  row: {
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    flexWrap: "wrap" as const,
-  },
+  card: { border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, marginBottom: 16 },
+  row: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const },
   input: { padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8 },
-  select: {
-    padding: "8px 10px",
-    border: "1px solid #cbd5e1",
-    borderRadius: 8,
-  },
-  button: {
-    padding: "8px 12px",
-    border: "1px solid #cbd5e1",
-    background: "#f8fafc",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  buttonPrimary: {
-    padding: "8px 12px",
-    border: "1px solid #2563eb",
-    background: "#2563eb",
-    color: "white",
-    borderRadius: 8,
-    cursor: "pointer",
-  },
-  tableWrap: {
-    overflowX: "auto" as const,
-    borderRadius: 12,
-    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-  },
+  select: { padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8 },
+  button: { padding: "8px 12px", border: "1px solid #cbd5e1", background: "#f8fafc", borderRadius: 8, cursor: "pointer" },
+  buttonPrimary: { padding: "8px 12px", border: "1px solid #2563eb", background: "#2563eb", color: "white", borderRadius: 8, cursor: "pointer" },
+  tableWrap: { overflowX: "auto" as const, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" },
   table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 14 },
-  th: {
-    textAlign: "left" as const,
-    padding: 12,
-    background: "#f8fafc",
-    color: "#475569",
-  },
+  th: { textAlign: "left" as const, padding: 12, background: "#f8fafc", color: "#475569" },
   td: { padding: 12, borderTop: "1px solid #f1f5f9" },
-  badge: {
-    border: "1px solid #cbd5e1",
-    borderRadius: 999,
-    padding: "2px 8px",
-    fontSize: 12,
-  },
-  stat: {
-    border: "1px solid #e5e7eb",
-    borderRadius: 12,
-    padding: 12,
-    textAlign: "center" as const,
-  },
+  badge: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "2px 8px", fontSize: 12 },
+  stat: { border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, textAlign: "center" as const },
 };
 
-// ---------- Scanner ----------
-function ScannerModal({
+// ------------------ UI PARTS ------------------
+function Modal({
   open,
-  mode,
+  title,
   onClose,
-  onScanned,
+  children,
 }: {
   open: boolean;
-  mode: "IN" | "OUT";
+  title: string;
   onClose: () => void;
-  onScanned: (code: string) => void;
+  children: React.ReactNode;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [supported, setSupported] = useState(false);
-  const [error, setError] = useState("");
-  const [manual, setManual] = useState("");
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    if (!open) return;
-    setError("");
-    setManual("");
-    let cancelled = false;
-    (async () => {
-      try {
-        const hasBarcode =
-          typeof (globalThis as any).BarcodeDetector !== "undefined";
-        setSupported(hasBarcode);
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-        });
-        if (cancelled) return;
-        streamRef.current = stream;
-        if (videoRef.current) {
-          (videoRef.current as any).srcObject = stream;
-          await (videoRef.current as any).play();
-        }
-        if (hasBarcode) {
-          const detector = new (window as any).BarcodeDetector({
-            formats: ["qr_code", "code_128", "ean_13", "ean_8", "upc_a", "upc_e"],
-          });
-          const tick = async () => {
-            try {
-              if (videoRef.current) {
-                const results = await detector.detect(videoRef.current);
-                if (results && results.length) {
-                  const payload =
-                    results[0].rawValue || results[0].cornerPoints?.toString();
-                  if (payload) {
-                    onScanned(String(payload));
-                  }
-                }
-              }
-            } catch {
-              /* ignore per frame errors */
-            }
-            rafRef.current = requestAnimationFrame(tick);
-          };
-          rafRef.current = requestAnimationFrame(tick);
-        }
-      } catch (e: any) {
-        setError(e?.message || "Camera access failed");
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      const s = streamRef.current;
-      streamRef.current = null;
-      if (s) s.getTracks().forEach((t) => t.stop());
-    };
-  }, [open]);
-
   if (!open) return null;
   return (
     <div
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.45)",
+        background: "rgba(0,0,0,0.3)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 60,
+        zIndex: 50,
       }}
+      role="dialog"
+      aria-modal="true"
     >
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 12,
-          width: "min(720px,95vw)",
-          padding: 16,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 8,
-          }}
-        >
-          <div style={{ fontWeight: 700 }}>
-            Scan to {mode === "IN" ? "ADD (IN)" : "REMOVE (OUT)"} inventory
-          </div>
+      <div style={{ background: "white", borderRadius: 12, padding: 16, width: "min(680px, 92vw)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontWeight: 600 }}>{title}</div>
           <button style={styles.button as any} onClick={onClose}>
             ✕
           </button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
-          {supported ? (
-            <div>
-              <video
-                ref={videoRef}
-                style={{ width: "100%", borderRadius: 12, background: "#000" }}
-                muted
-                playsInline
-              />
-              <div style={{ ...(styles.muted as any), marginTop: 6 }}>
-                Tip: QR/Code128/EAN/UPC supported. HTTPS required on phones.
-              </div>
-            </div>
-          ) : (
-            <div style={styles.muted as any}>
-              BarcodeDetector not supported in this browser. Use manual entry
-              below.
-            </div>
-          )}
-          {!!error && (
-            <div style={{ color: "#b91c1c", fontSize: 13 }}>Camera error: {error}</div>
-          )}
-          <div>
-            <div style={{ marginBottom: 6 }}>Manual code (fallback)</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                value={manual}
-                onChange={(e) => setManual(e.target.value)}
-                placeholder="Scan code or type here"
-                style={{ ...(styles.input as any), flex: 1 }}
-              />
-              <button
-                style={styles.buttonPrimary as any}
-                onClick={() => {
-                  if (manual.trim()) onScanned(manual.trim());
-                }}
-              >
-                Submit
-              </button>
-            </div>
-          </div>
-        </div>
+        <div>{children}</div>
       </div>
     </div>
   );
 }
 
-// ---------- Small UI blocks ----------
 function InventoryForm({
   initial,
   onSubmit,
@@ -409,9 +250,7 @@ function InventoryForm({
 }) {
   const [model, setModel] = useState(initial?.model || "");
   const [serial, setSerial] = useState(initial?.serial || "");
-  const [status, setStatus] = useState<Status>(
-    (initial?.status as Status) || "Stock"
-  );
+  const [status, setStatus] = useState<Status>((initial?.status as Status) || "Stock");
   const [location, setLocation] = useState(initial?.location || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [cost, setCost] = useState(initial?.cost?.toString() || "");
@@ -488,9 +327,7 @@ function InventoryForm({
           onChange={(e) => setReceivedAt(e.target.value)}
         />
       </div>
-      <div
-        style={{ gridColumn: "1 / span 2", display: "flex", justifyContent: "flex-end", gap: 8 }}
-      >
+      <div style={{ gridColumn: "1 / span 2", display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <button
           style={styles.buttonPrimary as any}
           onClick={() => {
@@ -550,77 +387,251 @@ function RowActions({
   );
 }
 
-// ---------- Auth Gate ----------
-function LoginView({ supa }: { supa: SupabaseClient }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [err, setErr] = useState("");
+function ScannerModal({
+  open,
+  mode,
+  onClose,
+  onScanned,
+}: {
+  open: boolean;
+  mode: "IN" | "OUT";
+  onClose: () => void;
+  onScanned: (code: string) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [supported, setSupported] = useState<boolean>(false);
+  const [error, setError] = useState<string>("");
+  const [manual, setManual] = useState<string>("");
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number | undefined>(undefined);
 
-  async function signIn() {
-    setErr("");
-    const { error } = await supa.auth.signInWithPassword({ email, password });
-    if (error) setErr(error.message);
-  }
+  useEffect(() => {
+    if (!open) return;
+    setError("");
+    setManual("");
+    let cancelled = false;
+    (async () => {
+      try {
+        const hasBarcode = typeof (globalThis as any).BarcodeDetector !== "undefined";
+        setSupported(hasBarcode);
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+        });
+        if (cancelled) return;
+        streamRef.current = stream;
+        if (videoRef.current) {
+          (videoRef.current as any).srcObject = stream;
+          await (videoRef.current as any).play();
+        }
+        if (hasBarcode) {
+          const detector = new (window as any).BarcodeDetector({
+            formats: ["qr_code", "code_128", "ean_13", "ean_8", "upc_a", "upc_e"],
+          });
+          const tick = async () => {
+            try {
+              if (videoRef.current) {
+                const results = await detector.detect(videoRef.current);
+                if (results && results.length) {
+                  const payload =
+                    results[0].rawValue || results[0].cornerPoints?.toString();
+                  if (payload) onScanned(String(payload));
+                }
+              }
+            } catch {}
+            rafRef.current = requestAnimationFrame(tick);
+          };
+          rafRef.current = requestAnimationFrame(tick);
+        }
+      } catch (e: any) {
+        setError(e?.message || "Camera access failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      const s = streamRef.current;
+      streamRef.current = null;
+      if (s) s.getTracks().forEach((t) => t.stop());
+    };
+  }, [open]);
 
+  if (!open) return null;
   return (
-    <div style={{ ...styles.container, maxWidth: 420 }}>
-      <div style={{ ...(styles.card as any) }}>
-        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Sign in</div>
-        <div style={{ marginBottom: 8, ...styles.muted as any }}>
-            Email/password only. No account creation from this page.
-        </div>
-        <div style={{ marginBottom: 8 }}>Email</div>
-        <input
-          style={{ ...(styles.input as any), width: "100%", marginBottom: 8 }}
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-          autoComplete="username"
-        />
-        <div style={{ marginBottom: 8 }}>Password</div>
-        <input
-          type="password"
-          style={{ ...(styles.input as any), width: "100%", marginBottom: 12 }}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-          autoComplete="current-password"
-        />
-        {err && (
-          <div style={{ color: "#b91c1c", fontSize: 13, marginBottom: 8 }}>
-            {err}
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 60,
+      }}
+    >
+      <div style={{ background: "#fff", borderRadius: 12, width: "min(720px,95vw)", padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontWeight: 700 }}>
+            Scan to {mode === "IN" ? "ADD (IN)" : "REMOVE (OUT)"} inventory
           </div>
-        )}
-        <button style={styles.buttonPrimary as any} onClick={signIn}>Sign in</button>
+          <button style={styles.button as any} onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+          {supported ? (
+            <div>
+              <video
+                ref={videoRef}
+                style={{ width: "100%", borderRadius: 12, background: "#000" }}
+                muted
+                playsInline
+              />
+              <div style={{ ...(styles.muted as any), marginTop: 6 }}>
+                Tip: QR / Code128 / EAN / UPC supported. On phones you must be on HTTPS.
+              </div>
+            </div>
+          ) : (
+            <div style={styles.muted as any}>
+              BarcodeDetector not supported in this browser. Use manual entry below.
+            </div>
+          )}
+
+          {!!error && <div style={{ color: "#b91c1c", fontSize: 13 }}>Camera error: {error}</div>}
+
+          <div>
+            <div style={{ marginBottom: 6 }}>Manual code (fallback)</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={manual}
+                onChange={(e) => setManual(e.target.value)}
+                placeholder="Scan code or type here"
+                style={{ ...(styles.input as any), flex: 1 }}
+              />
+              <button
+                style={styles.buttonPrimary as any}
+                onClick={() => {
+                  if (manual.trim()) onScanned(manual.trim());
+                }}
+              >
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-// ---------- Main App ----------
-export default function App() {
-  const [fatal, setFatal] = useState<string>("");
+function findBySerial(items: Item[], serial: string) {
+  return items.find((i) => (i.serial || "").toLowerCase() === serial.toLowerCase());
+}
+function createFromCode(code: string): Partial<Item> {
+  let model = "";
+  let serial = code.trim();
+  if (code.includes("|")) {
+    const [m, s] = code.split("|");
+    model = (m || "").trim();
+    serial = (s || "").trim();
+  }
+  return { model: model || "UNKNOWN", serial };
+}
 
-  // Create client (guard for missing env)
+// ------------------ AUTH FORM ------------------
+function SignIn({
+  supa,
+  onDone,
+}: {
+  supa: SupabaseClient;
+  onDone: () => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState<string>("");
+
+  async function handleSignIn() {
+    setErr("");
+    const { error } = await supa.auth.signInWithPassword({
+      email: email.trim(),
+      password: pw,
+    });
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    onDone();
+  }
+
+  return (
+    <div style={{ ...styles.card, maxWidth: 400, margin: "48px auto" }}>
+      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Sign in</div>
+      <div style={{ display: "grid", gap: 8 }}>
+        <div>
+          <div>Email</div>
+          <input
+            style={styles.input as any}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+          />
+        </div>
+        <div>
+          <div>Password</div>
+          <input
+            type="password"
+            style={styles.input as any}
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder="••••••••"
+          />
+        </div>
+        {err && <div style={{ color: "#b91c1c", fontSize: 12 }}>{err}</div>}
+        <button style={styles.buttonPrimary as any} onClick={handleSignIn}>
+          Sign in
+        </button>
+      </div>
+      <div style={{ ...(styles.muted as any), marginTop: 8 }}>
+        No new account creation in UI. Use Supabase Auth dashboard to create users.
+      </div>
+    </div>
+  );
+}
+
+// ------------------ MAIN APP ------------------
+export default function App() {
   const supa: SupabaseClient | null = useMemo(() => {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      setFatal(
-        "Supabase env missing. Define window.SUPABASE_URL and window.SUPABASE_ANON_KEY in index.html."
-      );
+      console.debug("Supabase env missing. Running local-only.");
       return null;
     }
-    try {
-      return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        auth: { persistSession: false },
-      });
-    } catch (e: any) {
-      setFatal(e?.message || "Failed to init Supabase client");
-      return null;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true },
+    });
   }, []);
 
-  const [session, setSession] = useState<Session | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [authed, setAuthed] = useState(false);
+
+  // auth bootstrap
+  useEffect(() => {
+    (async () => {
+      if (!supa) {
+        setSessionReady(true);
+        setAuthed(true); // local-only mode
+        return;
+      }
+      const { data } = await supa.auth.getSession();
+      setAuthed(!!data.session);
+      setSessionReady(true);
+
+      // listen to auth changes
+      supa.auth.onAuthStateChange((_event, sess) => {
+        setAuthed(!!sess);
+      });
+    })();
+  }, [supa]);
+
+  // state
   const [items, setItems] = useState<Item[]>(loadLocal());
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -631,35 +642,30 @@ export default function App() {
   const [scanMode, setScanMode] = useState<"IN" | "OUT">("IN");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Auth state
+  // initial sync from DB
   useEffect(() => {
-    if (!supa) return;
     (async () => {
-      const { data } = await supa.auth.getSession();
-      setSession(data.session ?? null);
-      supa.auth.onAuthStateChange((_evt, s) => setSession(s));
-    })();
-  }, [supa]);
-
-  // Initial select
-  useEffect(() => {
-    if (!supa || !session) return;
-    (async () => {
+      if (!supa || !authed) return;
       const { data, error } = await supa
         .from("inventory")
         .select("*")
         .order("updated_at", { ascending: false });
       if (error) {
-        setFatal("DB select error: " + error.message);
+        console.error("select error", error);
         return;
       }
-      const mapped = (data || []).map(fromDb);
-      setItems(mapped);
-      saveLocal(mapped);
+      if (data && data.length) {
+        const mapped = data.map(fromDb);
+        setItems(mapped);
+        saveLocal(mapped);
+      } else if (USE_SEED_ON_EMPTY) {
+        setItems(seedData);
+        saveLocal(seedData);
+      }
     })();
-  }, [supa, session]);
+  }, [supa, authed]);
 
-  // Persist locally always
+  // persist local
   useEffect(() => {
     saveLocal(items);
   }, [items]);
@@ -689,15 +695,15 @@ export default function App() {
   }, [filtered]);
 
   async function dbUpsert(it: Item) {
-    if (!supa) return;
+    if (!supa || !authed) return;
     const row = toDb(it);
     const { error } = await supa.from("inventory").upsert(row, { onConflict: "id" });
-    if (error) setFatal("DB upsert error: " + error.message);
+    if (error) console.error("upsert error", error);
   }
   async function dbDelete(id: string) {
-    if (!supa) return;
+    if (!supa || !authed) return;
     const { error } = await supa.from("inventory").delete().eq("id", id);
-    if (error) setFatal("DB delete error: " + error.message);
+    if (error) console.error("delete error", error);
   }
 
   const upsert = (it: Item) => {
@@ -732,96 +738,82 @@ export default function App() {
     if (!imported.length) return;
     const merged = [...imported, ...items];
     setItems(merged);
-    if (supa) {
-      const rows = imported.map(toDb);
-      const { error } = await supa.from("inventory").upsert(rows, { onConflict: "id" });
-      if (error) setFatal("Bulk upsert error: " + error.message);
+    if (supa && authed) {
+      const { error } = await supa
+        .from("inventory")
+        .upsert(imported.map(toDb), { onConflict: "id" });
+      if (error) console.error("bulk upsert", error);
     }
   };
 
-  // ---- Scan handling ----
   const handleScanned = (code: string) => {
     setScanOpen(false);
     const now = nowIso();
-    const exists = items.find(
-      (i) => (i.serial || "").toLowerCase() === code.toLowerCase()
-    );
-
     if (scanMode === "IN") {
+      const exists = findBySerial(items, code);
       if (exists) {
         quickUpdate(exists, { status: "Stock" });
       } else {
-        const [m, s] = code.includes("|") ? code.split("|") : ["", code];
+        const base = createFromCode(code);
         const newItem: Item = {
           id: uuid(),
-          model: (m || "UNKNOWN").trim(),
-          serial: (s || code).trim(),
+          model: base.model || "UNKNOWN",
+          serial: base.serial,
           status: "Stock",
           updatedAt: now,
-        };
+        } as Item;
         setItems((prev) => [newItem, ...prev]);
         dbUpsert(newItem);
       }
     } else {
+      const exists = findBySerial(items, code);
       if (exists) {
         quickUpdate(exists, { status: "Installed/Sold" });
       } else {
-        const [m, s] = code.includes("|") ? code.split("|") : ["", code];
+        const base = createFromCode(code);
         const newItem: Item = {
           id: uuid(),
-          model: (m || "UNKNOWN").trim(),
-          serial: (s || code).trim(),
+          model: base.model || "UNKNOWN",
+          serial: base.serial,
           status: "Installed/Sold",
           notes: "Scanned OUT (placeholder)",
           updatedAt: now,
-        };
+        } as Item;
         setItems((prev) => [newItem, ...prev]);
         dbUpsert(newItem);
       }
     }
   };
 
-  // ---------- RENDER ----------
-  if (fatal) {
-    return (
-      <div style={{ ...styles.container, color: "#b91c1c" as any }}>
-        <div style={{ ...(styles.card as any) }}>
-          <b>Error</b>
-          <div style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{fatal}</div>
-        </div>
-      </div>
-    );
+  // --------------- RENDER ---------------
+  if (!sessionReady) {
+    return <div style={{ padding: 24 }}>Loading…</div>;
   }
 
-  if (!supa) {
-    return (
-      <div style={{ ...styles.container }}>
-        <div style={{ ...(styles.card as any), color: "#b91c1c" }}>
-          Supabase client not initialized. Set <code>window.SUPABASE_URL</code> and{" "}
-          <code>window.SUPABASE_ANON_KEY</code> in <code>index.html</code>.
-        </div>
-      </div>
-    );
+  if (supa && !authed) {
+    // Password login — no magic link
+    return <SignIn supa={supa} onDone={() => setAuthed(true)} />;
   }
-
-  if (!session) return <LoginView supa={supa} />;
 
   return (
     <div style={styles.container as any}>
-      <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={styles.h1 as any}>Inventory Manager</div>
-        <span style={{ ...styles.muted as any, marginLeft: 8 }}>
-          (signed in)
-        </span>
-        <span style={{ flex: 1 }} />
-        <button
-          style={styles.button as any}
-          onClick={() => {
-            supa.auth.signOut();
-          }}
-        >
-          Sign out
-        </button>
+      <div style={{ marginBottom: 12 }}>
+        <div style={styles.h1 as any}>4Seasons / Gaslight — Inventory Manager</div>
+        <div style={styles.muted as any}>
+          Email/Password auth • Supabase sync (received_at / updated_at) • Scanner IN/OUT • CSV
+        </div>
+        {supa && authed && (
+          <div style={{ marginTop: 6 }}>
+            <button
+              style={styles.button as any}
+              onClick={async () => {
+                await supa!.auth.signOut();
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Controls */}
@@ -979,7 +971,7 @@ export default function App() {
         </table>
       </div>
 
-      {/* Edit / Create Modal */}
+      {/* Edit/Create */}
       <Modal
         open={open || !!editing}
         title={editing ? "Edit Item" : "Add Item"}
@@ -1005,13 +997,19 @@ export default function App() {
         )}
       </Modal>
 
-      {/* Scanner Modal */}
+      {/* Scanner */}
       <ScannerModal
         open={scanOpen}
         mode={scanMode}
         onClose={() => setScanOpen(false)}
         onScanned={handleScanned}
       />
+
+      <div style={{ ...(styles.muted as any), marginTop: 16 }}>
+        If you see sync errors, make sure your table is <code>public.inventory</code> with
+        columns <code>id, model, serial, status, location, notes, cost, received_at, updated_at</code>.
+        Policies should allow authenticated users to select/insert/update/delete.
+      </div>
     </div>
   );
 }
