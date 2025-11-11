@@ -161,22 +161,7 @@ function parseCSV(text: string): Item[] {
 }
 
 // ------------------ SEED (optional) ------------------
-const seedData: Item[] = [
-  { id: uuid(), model: "EX11CN", status: "Stock", notes: "Sylvia", updatedAt: nowIso() },
-  { id: uuid(), model: "EX11CN", status: "Stock", notes: "Sylvia", updatedAt: nowIso() },
-  { id: uuid(), model: "EX11CN", status: "Stock", notes: "Sylvia", updatedAt: nowIso() },
-  { id: uuid(), model: "EX17CN", status: "Open Box", location: "take back from 1614 Allison", notes: "Sylvia", updatedAt: nowIso() },
-  { id: uuid(), model: "EX17CN", status: "Display", location: "Showroom Display", notes: "Showroom", updatedAt: nowIso() },
-  { id: uuid(), model: "EX22CN", serial: "NB.LB-003680", status: "Stock", notes: "Sylvia", updatedAt: nowIso() },
-  { id: uuid(), model: "EX22CN", serial: "NB.LB-003006", status: "Stock", location: "Shop — 1619 Prairie (10-7533)", notes: "Aug 25", updatedAt: nowIso() },
-  { id: uuid(), model: "EX22CN", serial: "24397", status: "Stock", location: "Shop", notes: "July 23 — new stock at shop, finally sale", updatedAt: nowIso() },
-  { id: uuid(), model: "EX22CN", serial: "NB.LB-003008", status: "Stock", location: "Shop", notes: "July 23 — new stock at shop, finally sale", updatedAt: nowIso() },
-  { id: uuid(), model: "AR9T960603BN", serial: "2505267633", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: nowIso() },
-  { id: uuid(), model: "AR9T960603BN", serial: "2505272372", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: nowIso() },
-  { id: uuid(), model: "AR9T960603BN", serial: "2505272374", status: "Ordered", location: "4 Seasons", notes: "JULY 2025 — our cost $2309 with tax", updatedAt: nowIso() },
-  { id: uuid(), model: "AMVM970803BN", serial: "2411115464", status: "Stock", location: "Shop", notes: "10-10", updatedAt: nowIso() },
-  { id: uuid(), model: "AMVM970803BN", serial: "2411115465", status: "Stock", location: "Shop", notes: "10-10", updatedAt: nowIso() },
-];
+const seedData: Item[] = [];
 
 // ------------------ STYLES ------------------
 const styles = {
