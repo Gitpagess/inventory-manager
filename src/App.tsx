@@ -571,9 +571,7 @@ function SignIn({
           Sign in
         </button>
       </div>
-      <div style={{ ...(styles.muted as any), marginTop: 8 }}>
-        No new account creation in UI. Use Supabase Auth dashboard to create users.
-      </div>
+
     </div>
   );
 }
@@ -779,10 +777,7 @@ export default function App() {
   return (
     <div style={styles.container as any}>
       <div style={{ marginBottom: 12 }}>
-        <div style={styles.h1 as any}>4Seasons / Gaslight — Inventory Manager</div>
-        <div style={styles.muted as any}>
-          Email/Password auth • Supabase sync (received_at / updated_at) • Scanner IN/OUT • CSV
-        </div>
+        <div style={styles.h1 as any}>Inventory Manager</div>
         {supa && authed && (
           <div style={{ marginTop: 6 }}>
             <button
@@ -986,11 +981,7 @@ export default function App() {
         onScanned={handleScanned}
       />
 
-      <div style={{ ...(styles.muted as any), marginTop: 16 }}>
-        If you see sync errors, make sure your table is <code>public.inventory</code> with
-        columns <code>id, model, serial, status, location, notes, cost, received_at, updated_at</code>.
-        Policies should allow authenticated users to select/insert/update/delete.
-      </div>
+
     </div>
   );
 }
